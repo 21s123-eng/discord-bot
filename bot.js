@@ -9,18 +9,14 @@ const TOKEN = process.env.TOKEN;
 const OWNER_ID = '1125609597613375629';
 const LOG_CHANNEL_ID = '1492108809618063432';
 
+console.log('NEW CODE VERSION 8 ATTEMPTS - ROLE FIX ACTIVE');
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildExpressions,
-        GatewayIntentBits.GuildIntegrations,
-        GatewayIntentBits.GuildWebhooks,
-        GatewayIntentBits.GuildInvites,
-        GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildPresences,
     ],
 });
 
@@ -65,11 +61,43 @@ async function log(guild, msg) {
             return;
         }
 
-        await channel.send(`🔍 ${msg}`).catch((e) => {
+        await channel.send(`[LOG] ${msg}`).catch((e) => {
             console.log(`[LOG SEND ERR] ${e.message}`);
         });
     } catch (e) {
         console.log(`[LOG ERR] ${e.message}`);
+    }
+}
+
+function printAuditDebug(entries) {
+    for (const e of entries.slice(0, 8)) {
+        console.log(
+            `[AUDIT DEBUG] action:${e.action} target:${e.target?.id ?? 'none'} executor:${e.executor?.id ?? 'none'} age:${Date.now() - e.createdTimestamp}ms`
+        );
+    }
+}
+
+async function fetchAuditEntries(guild, auditLogEvent) {
+    try {
+        const logs = await guild.fetchAuditLogs({
+            type: auditLogEvent,
+            limit: 20,
+        });
+
+        return [...logs.entries.values()];
+    } catch (e) {
+        console.log(`[AUDIT TYPE ERR] ${e.message}`);
+    }
+
+    try {
+        const logs = await guild.fetchAuditLogs({
+            limit: 20,
+        });
+
+        return [...logs.entries.values()];
+    } catch (e) {
+        console.log(`[AUDIT ALL ERR] ${e.message}`);
+        return [];
     }
 }
 
@@ -80,20 +108,11 @@ async function getAuditExecutor(guild, auditLogEvent, targetId = null) {
         await wait(1200);
 
         try {
-            const logs = await guild.fetchAuditLogs({
-                type: auditLogEvent,
-                limit: 20,
-            });
-
-            const entries = [...logs.entries.values()];
+            let entries = await fetchAuditEntries(guild, auditLogEvent);
 
             console.log(`[AUDIT] attempt ${attempt} — entries: ${entries.length}`);
 
-            for (const e of entries.slice(0, 5)) {
-                console.log(
-                    `[AUDIT DEBUG] type:${e.action} target:${e.target?.id ?? 'none'} executor:${e.executor?.id ?? 'none'} age:${Date.now() - e.createdTimestamp}ms`
-                );
-            }
+            printAuditDebug(entries);
 
             let entry = null;
 
@@ -103,7 +122,7 @@ async function getAuditExecutor(guild, auditLogEvent, targetId = null) {
                         e.target?.id === targetId &&
                         e.executor?.id &&
                         e.executor.id !== client.user?.id &&
-                        e.createdTimestamp >= startTime - 15000
+                        e.createdTimestamp >= startTime - 20000
                 );
             }
 
@@ -112,7 +131,7 @@ async function getAuditExecutor(guild, auditLogEvent, targetId = null) {
                     (e) =>
                         e.executor?.id &&
                         e.executor.id !== client.user?.id &&
-                        e.createdTimestamp >= startTime - 15000
+                        e.createdTimestamp >= startTime - 20000
                 );
             }
 
@@ -215,39 +234,47 @@ async function punish(guild, executor, reason) {
     }
 }
 
+async function storeGuildRoles(guild) {
+    const roles = await guild.roles.fetch();
+
+    for (const [, role] of roles) {
+        storedRolePositions.set(`${guild.id}:${role.id}`, role.rawPosition);
+    }
+
+    console.log(`[STORE] ${guild.name}: stored ${roles.size} roles`);
+}
+
+async function storeGuildChannels(guild) {
+    const channels = await guild.channels.fetch();
+
+    for (const [, channel] of channels) {
+        if (channel) {
+            storedChannelPositions.set(`${guild.id}:${channel.id}`, channel.rawPosition);
+        }
+    }
+
+    console.log(`[STORE] ${guild.name}: stored ${channels.size} channels`);
+}
+
 client.once('clientReady', async () => {
     console.log(`[Bot] Online as ${client.user.tag}`);
 
     for (const [, guild] of client.guilds.cache) {
         try {
-            const roles = await guild.roles.fetch();
-
-            for (const [, role] of roles) {
-                storedRolePositions.set(`${guild.id}:${role.id}`, role.rawPosition);
-            }
-
-            console.log(`[Bot] ${guild.name}: tracked ${roles.size} roles`);
+            await storeGuildRoles(guild);
         } catch (e) {
             console.log(`[Bot] Failed roles fetch: ${e.message}`);
         }
 
         try {
-            const channels = await guild.channels.fetch();
-
-            for (const [, channel] of channels) {
-                if (channel) {
-                    storedChannelPositions.set(`${guild.id}:${channel.id}`, channel.rawPosition);
-                }
-            }
-
-            console.log(`[Bot] ${guild.name}: tracked ${channels.size} channels`);
+            await storeGuildChannels(guild);
         } catch (e) {
             console.log(`[Bot] Failed channels fetch: ${e.message}`);
         }
     }
 
-    console.log(`[Bot] Total: ${storedRolePositions.size} role positions stored`);
-    console.log(`[Bot] Total: ${storedChannelPositions.size} channel positions stored`);
+    console.log(`[Bot] Total role positions stored: ${storedRolePositions.size}`);
+    console.log(`[Bot] Total channel positions stored: ${storedChannelPositions.size}`);
     console.log(`[Bot] Protection active`);
 });
 
@@ -286,7 +313,7 @@ client.on('roleDelete', async (role) => {
 
     storedRolePositions.delete(`${role.guild.id}:${role.id}`);
 
-    console.log(`[roleDelete] ${role.name}`);
+    console.log(`[roleDelete] ${role.name} savedPosition:${savedPosition}`);
 
     try {
         const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
@@ -342,12 +369,24 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
         const nameChanged = oldRole.name !== newRole.name;
         const colorChanged = oldRole.color !== newRole.color;
+        const permissionsChanged = oldRole.permissions.bitfield !== newRole.permissions.bitfield;
+        const mentionableChanged = oldRole.mentionable !== newRole.mentionable;
+        const hoistChanged = oldRole.hoist !== newRole.hoist;
         const positionChanged = storedPosition !== newRole.rawPosition;
 
-        if (!nameChanged && !colorChanged && !positionChanged) return;
+        if (
+            !nameChanged &&
+            !colorChanged &&
+            !permissionsChanged &&
+            !mentionableChanged &&
+            !hoistChanged &&
+            !positionChanged
+        ) {
+            return;
+        }
 
         console.log(
-            `[roleUpdate] ${newRole.name} | name:${nameChanged} color:${colorChanged} pos:${positionChanged} stored:${storedPosition} new:${newRole.rawPosition}`
+            `[roleUpdate] ${newRole.name} | name:${nameChanged} color:${colorChanged} perms:${permissionsChanged} mention:${mentionableChanged} hoist:${hoistChanged} pos:${positionChanged} stored:${storedPosition} new:${newRole.rawPosition}`
         );
 
         if (positionChanged) {
@@ -415,12 +454,18 @@ client.on('roleUpdate', async (oldRole, newRole) => {
             return;
         }
 
-        const reason = nameChanged ? 'تغيير اسم رتبه' : 'تغيير لون رتبه';
+        let reason = 'تعديل رتبه';
+
+        if (nameChanged) reason = 'تغيير اسم رتبه';
+        else if (colorChanged) reason = 'تغيير لون رتبه';
+        else if (permissionsChanged) reason = 'تغيير صلاحيات رتبه';
+        else if (mentionableChanged) reason = 'تغيير منشن رتبه';
+        else if (hoistChanged) reason = 'تغيير ظهور رتبه';
 
         const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
         if (!executor) {
-            console.log(`[roleUpdate] no executor name/color`);
+            console.log(`[roleUpdate] no executor for normal role update — restoring only`);
 
             if (nameChanged) {
                 await newRole.setName(oldRole.name).catch((e) => {
@@ -431,6 +476,24 @@ client.on('roleUpdate', async (oldRole, newRole) => {
             if (colorChanged) {
                 await newRole.setColor(oldRole.color).catch((e) => {
                     console.log(`[roleUpdate setColor ERR] ${e.message}`);
+                });
+            }
+
+            if (permissionsChanged) {
+                await newRole.setPermissions(oldRole.permissions).catch((e) => {
+                    console.log(`[roleUpdate setPermissions ERR] ${e.message}`);
+                });
+            }
+
+            if (mentionableChanged) {
+                await newRole.setMentionable(oldRole.mentionable).catch((e) => {
+                    console.log(`[roleUpdate setMentionable ERR] ${e.message}`);
+                });
+            }
+
+            if (hoistChanged) {
+                await newRole.setHoist(oldRole.hoist).catch((e) => {
+                    console.log(`[roleUpdate setHoist ERR] ${e.message}`);
                 });
             }
 
@@ -451,6 +514,24 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         if (colorChanged) {
             await newRole.setColor(oldRole.color).catch((e) => {
                 console.log(`[roleUpdate setColor ERR] ${e.message}`);
+            });
+        }
+
+        if (permissionsChanged) {
+            await newRole.setPermissions(oldRole.permissions).catch((e) => {
+                console.log(`[roleUpdate setPermissions ERR] ${e.message}`);
+            });
+        }
+
+        if (mentionableChanged) {
+            await newRole.setMentionable(oldRole.mentionable).catch((e) => {
+                console.log(`[roleUpdate setMentionable ERR] ${e.message}`);
+            });
+        }
+
+        if (hoistChanged) {
+            await newRole.setHoist(oldRole.hoist).catch((e) => {
+                console.log(`[roleUpdate setHoist ERR] ${e.message}`);
             });
         }
 
@@ -499,7 +580,7 @@ client.on('channelDelete', async (channel) => {
 
     storedChannelPositions.delete(`${channel.guild.id}:${channel.id}`);
 
-    console.log(`[channelDelete] ${channel.name}`);
+    console.log(`[channelDelete] ${channel.name} savedPosition:${savedPosition}`);
 
     try {
         const isCategory = channel.type === ChannelType.GuildCategory;
@@ -576,162 +657,4 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
         const newPerms = newChannel.permissionOverwrites?.cache;
 
         let permChanged = false;
-        let permAdded = false;
-
-        if (oldPerms && newPerms) {
-            if (newPerms.size > oldPerms.size) {
-                permChanged = true;
-                permAdded = true;
-            } else if (newPerms.size < oldPerms.size) {
-                permChanged = true;
-            } else {
-                for (const [id, newOw] of newPerms) {
-                    const oldOw = oldPerms.get(id);
-
-                    if (
-                        !oldOw ||
-                        oldOw.allow.bitfield !== newOw.allow.bitfield ||
-                        oldOw.deny.bitfield !== newOw.deny.bitfield
-                    ) {
-                        permChanged = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!nameChanged && !positionChanged && !permChanged) return;
-
-        console.log(
-            `[channelUpdate] ${newChannel.name} | name:${nameChanged} pos:${positionChanged} perms:${permChanged} stored:${storedPosition} new:${newChannel.rawPosition}`
-        );
-
-        if (positionChanged && !nameChanged && !permChanged) {
-            if (botRestoringChannelGuilds.has(newChannel.guild.id)) {
-                console.log(`[channelUpdate] bot restore event ignored`);
-                storedChannelPositions.set(storedKey, newChannel.rawPosition);
-                return;
-            }
-
-            let executorPromise = guildChannelPositionChangePromises.get(newChannel.guild.id);
-
-            if (!executorPromise) {
-                executorPromise = getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, null);
-
-                guildChannelPositionChangePromises.set(newChannel.guild.id, executorPromise);
-
-                setTimeout(() => {
-                    guildChannelPositionChangePromises.delete(newChannel.guild.id);
-                }, 15000);
-            }
-
-            const executor = await executorPromise;
-
-            if (botRestoringChannelGuilds.has(newChannel.guild.id)) {
-                storedChannelPositions.set(storedKey, newChannel.rawPosition);
-                return;
-            }
-
-            botRestoringChannelGuilds.add(newChannel.guild.id);
-
-            setTimeout(() => {
-                botRestoringChannelGuilds.delete(newChannel.guild.id);
-            }, 10000);
-
-            const reason = isCategory ? 'حرك كاتوقري' : 'حرك روم';
-
-            await newChannel.setPosition(storedPosition).catch((e) => {
-                console.log(`[channelUpdate setPos ERR] ${e.message}`);
-            });
-
-            storedChannelPositions.set(storedKey, storedPosition);
-
-            if (!executor) {
-                console.log(`[channelUpdate] no executor — restored channel but cannot punish`);
-                await log(newChannel.guild, `رجعت الروم مكانه، لكن ما قدرت أعرف مين حرّكه من Audit Log`);
-                return;
-            }
-
-            if (isIgnored(executor.id)) {
-                console.log(`[channelUpdate] executor ignored`);
-                return;
-            }
-
-            await punish(newChannel.guild, executor, reason);
-            return;
-        }
-
-        let reason;
-
-        if (nameChanged) {
-            reason = 'غير اسم روم او شات';
-        } else if (permChanged) {
-            if (isCategory) {
-                reason = permAdded ? 'اضاف رتبه في كاتوقري' : 'حذف رتبه في كاتوقري';
-            } else {
-                reason = permAdded ? 'اضاف رتبه في روم او شات' : 'حذف رتبه في روم او شات';
-            }
-        } else {
-            return;
-        }
-
-        const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
-
-        if (!executor) {
-            console.log(`[channelUpdate] no executor`);
-
-            if (nameChanged) {
-                await newChannel.setName(oldChannel.name).catch((e) => {
-                    console.log(`[channelUpdate setName ERR] ${e.message}`);
-                });
-            }
-
-            if (permChanged && oldPerms) {
-                await newChannel.permissionOverwrites.set(
-                    oldPerms.map((o) => ({
-                        id: o.id,
-                        type: o.type,
-                        allow: o.allow,
-                        deny: o.deny,
-                    }))
-                ).catch((e) => {
-                    console.log(`[channelUpdate perms ERR] ${e.message}`);
-                });
-            }
-
-            return;
-        }
-
-        if (isIgnored(executor.id)) return;
-
-        if (nameChanged) {
-            await newChannel.setName(oldChannel.name).catch((e) => {
-                console.log(`[channelUpdate setName ERR] ${e.message}`);
-            });
-        }
-
-        if (permChanged && oldPerms) {
-            await newChannel.permissionOverwrites.set(
-                oldPerms.map((o) => ({
-                    id: o.id,
-                    type: o.type,
-                    allow: o.allow,
-                    deny: o.deny,
-                }))
-            ).catch((e) => {
-                console.log(`[channelUpdate perms ERR] ${e.message}`);
-            });
-        }
-
-        await punish(newChannel.guild, executor, reason);
-    } catch (e) {
-        console.log(`[channelUpdate ERR] ${e.message}`);
-    }
-});
-
-if (!TOKEN) {
-    console.log('[Bot] TOKEN is missing from environment variables');
-    process.exit(1);
-}
-
-client.login(TOKEN);
+        let
