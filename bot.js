@@ -551,15 +551,9 @@ async function clearMessages(interaction, amount) {
     let before = null;
 
     while (deletedTotal < amount) {
-        const limit = Math.min(100, amount - deletedTotal);
-        const options = { limit };
+        if (!TOKEN) {
+    console.log('[Bot] TOKEN is missing from environment variables');
+    process.exit(1);
+}
 
-        if (before) {
-            options.before = before;
-        }
-
-        const messages = await interaction.channel.messages.fetch(options);
-
-        if (messages.size === 0) break;
-
-        before = messages.last()?.id
+client.login(TOKEN);
