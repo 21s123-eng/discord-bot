@@ -9,7 +9,7 @@ const TOKEN = process.env.TOKEN;
 const OWNER_ID = '1125609597613375629';
 const LOG_CHANNEL_ID = '1492108809618063432';
 
-console.log('NEW CODE VERSION FIXED COMPLETE BOT');
+console.log('NEW CODE VERSION IMMEDIATE ROLE RESTORE');
 
 const client = new Client({
     intents: [
@@ -392,10 +392,29 @@ client.on('roleUpdate', async (oldRole, newRole) => {
                 return;
             }
 
+            botRestoringRoles.add(newRole.guild.id);
+
+            setTimeout(() => {
+                botRestoringRoles.delete(newRole.guild.id);
+            }, 10000);
+
+            console.log(`[roleUpdate] restoring immediately ${newRole.name} from ${newRole.rawPosition} to ${storedPosition}`);
+
+            await log(
+                newRole.guild,
+                `Role moved: ${newRole.name} — restoring immediately from ${newRole.rawPosition} to ${storedPosition}`
+            );
+
+            await newRole.setPosition(storedPosition, { relative: false }).catch((e) => {
+                console.log(`[roleUpdate setPosition ERR] ${e.message}`);
+            });
+
+            storedRolePositions.set(key, storedPosition);
+
             let executorPromise = guildRoleAuditPromises.get(newRole.guild.id);
 
             if (!executorPromise) {
-                console.log('[roleUpdate] starting audit lookup...');
+                console.log('[roleUpdate] starting audit lookup after restore...');
 
                 executorPromise = getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, null);
                 guildRoleAuditPromises.set(newRole.guild.id, executorPromise);
@@ -406,31 +425,6 @@ client.on('roleUpdate', async (oldRole, newRole) => {
             }
 
             const executor = await executorPromise;
-
-            if (botRestoringRoles.has(newRole.guild.id)) {
-                console.log('[roleUpdate] bot restore event ignored after audit');
-                storedRolePositions.set(key, newRole.rawPosition);
-                return;
-            }
-
-            botRestoringRoles.add(newRole.guild.id);
-
-            setTimeout(() => {
-                botRestoringRoles.delete(newRole.guild.id);
-            }, 10000);
-
-            console.log(`[roleUpdate] restoring ${newRole.name} from ${newRole.rawPosition} to ${storedPosition}`);
-
-            await log(
-                newRole.guild,
-                `Role moved: ${newRole.name} — restoring from ${newRole.rawPosition} to ${storedPosition}`
-            );
-
-            await newRole.setPosition(storedPosition, { relative: false }).catch((e) => {
-                console.log(`[roleUpdate setPosition ERR] ${e.message}`);
-            });
-
-            storedRolePositions.set(key, storedPosition);
 
             if (!executor) {
                 console.log('[roleUpdate] no executor — restored role but cannot punish');
@@ -654,26 +648,6 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
                 return;
             }
 
-            let executorPromise = guildChannelAuditPromises.get(newChannel.guild.id);
-
-            if (!executorPromise) {
-                console.log('[channelUpdate] starting audit lookup...');
-
-                executorPromise = getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, null);
-                guildChannelAuditPromises.set(newChannel.guild.id, executorPromise);
-
-                setTimeout(() => {
-                    guildChannelAuditPromises.delete(newChannel.guild.id);
-                }, 15000);
-            }
-
-            const executor = await executorPromise;
-
-            if (botRestoringChannels.has(newChannel.guild.id)) {
-                storedChannelPositions.set(key, newChannel.rawPosition ?? 0);
-                return;
-            }
-
             botRestoringChannels.add(newChannel.guild.id);
 
             setTimeout(() => {
@@ -685,6 +659,21 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
             });
 
             storedChannelPositions.set(key, storedPosition);
+
+            let executorPromise = guildChannelAuditPromises.get(newChannel.guild.id);
+
+            if (!executorPromise) {
+                console.log('[channelUpdate] starting audit lookup after restore...');
+
+                executorPromise = getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, null);
+                guildChannelAuditPromises.set(newChannel.guild.id, executorPromise);
+
+                setTimeout(() => {
+                    guildChannelAuditPromises.delete(newChannel.guild.id);
+                }, 15000);
+            }
+
+            const executor = await executorPromise;
 
             if (!executor) {
                 console.log('[channelUpdate] no executor — restored channel but cannot punish');
