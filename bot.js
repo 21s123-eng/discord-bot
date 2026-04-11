@@ -1,5 +1,5 @@
 import {
-    Client,ddddd
+    Client,
     GatewayIntentBits,
     AuditLogEvent,
     ChannelType,
