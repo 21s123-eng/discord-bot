@@ -58,6 +58,11 @@ const botActions = new Set();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
 
+// FIX: guild-level flags set BEFORE role/channel creation so roleCreate/channelCreate
+// events that fire during creation are recognized as bot actions immediately
+const restoringRoles = new Set();
+const restoringChannels = new Set();
+
 const AUDIT_RETRIES = 6;
 const AUDIT_WAIT_MS = 1000;
 const PUNISH_COOLDOWN_MS = 5000;
@@ -317,6 +322,10 @@ async function punish(guild, executor, reason) {
 }
 
 async function restoreDeletedRole(guild, oldRoleId, snapshot) {
+    // FIX: mark guild as restoring BEFORE creation so the roleCreate event
+    // that fires during guild.roles.create() is treated as a bot action
+    restoringRoles.add(guild.id);
+
     const role = await guild.roles.create({
         name: snapshot.name,
         color: snapshot.color,
@@ -328,6 +337,8 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         console.log(`[RESTORE ROLE ERR] ${error.message}`);
         return null;
     });
+
+    restoringRoles.delete(guild.id);
 
     if (!role) return null;
 
@@ -374,6 +385,10 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 }
 
 async function restoreDeletedChannel(guild, snapshot) {
+    // FIX: mark guild as restoring BEFORE creation so the channelCreate event
+    // that fires during guild.channels.create() is treated as a bot action
+    restoringChannels.add(guild.id);
+
     const options = {
         name: snapshot.name,
         type: snapshot.type,
@@ -409,6 +424,8 @@ async function restoreDeletedChannel(guild, snapshot) {
         console.log(`[RESTORE CHANNEL ERR] ${error.message}`);
         return null;
     });
+
+    restoringChannels.delete(guild.id);
 
     if (!channel) return null;
 
@@ -701,7 +718,9 @@ client.on('roleCreate', async (role) => {
 
     const key = roleKey(role.guild.id, role.id);
 
-    if (isBotAction(key)) {
+    // FIX: check guild-level restore flag BEFORE isBotAction — new role ID isn't
+    // known until after creation, so markBotAction can't be called in advance
+    if (restoringRoles.has(role.guild.id) || isBotAction(key)) {
         saveRole(role);
         return;
     }
@@ -839,7 +858,8 @@ client.on('channelCreate', async (channel) => {
 
     const key = channelKey(channel.guild.id, channel.id);
 
-    if (isBotAction(key)) {
+    // FIX: check guild-level restore flag BEFORE isBotAction
+    if (restoringChannels.has(channel.guild.id) || isBotAction(key)) {
         saveChannel(channel);
         return;
     }
