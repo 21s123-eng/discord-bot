@@ -1,9 +1,9 @@
 import {
     Client,
     GatewayIntentBits,
+    Partials,
     AuditLogEvent,
     ChannelType,
-    Partials,
     ApplicationCommandOptionType,
 } from 'discord.js';
 
@@ -19,9 +19,6 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
-const CLEAR_COMMAND_NAME = 'clear';
-const MAX_CLEAR_AMOUNT = 1000;
-
 const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1492517673584558140',
     '1492517632186781767',
@@ -31,6 +28,14 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1492517424325726300',
     '1492516778071556368',
 ]);
+
+const CLEAR_COMMAND_NAME = 'clear';
+const MAX_CLEAR_AMOUNT = 1000;
+
+const AUDIT_RETRIES = 6;
+const AUDIT_WAIT_MS = 1000;
+const PUNISH_COOLDOWN_MS = 5000;
+const AVATAR_SEPARATOR_COOLDOWN_MS = 3000;
 
 console.log('NEW CODE VERSION HERE VERIFY SHORT CLEAN FULL PROTECTION');
 
@@ -57,11 +62,6 @@ const memberRoleSnapshots = new Map();
 const botActions = new Set();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
-
-const AUDIT_RETRIES = 6;
-const AUDIT_WAIT_MS = 1000;
-const PUNISH_COOLDOWN_MS = 5000;
-const AVATAR_SEPARATOR_COOLDOWN_MS = 3000;
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -191,23 +191,31 @@ async function snapshotGuild(guild) {
         console.log(`[SNAPSHOT MEMBERS ERR] ${error.message}`);
     }
 
-    const roles = await guild.roles.fetch();
+    try {
+        const roles = await guild.roles.fetch();
 
-    for (const [, role] of roles) {
-        saveRole(role);
+        for (const [, role] of roles) {
+            saveRole(role);
+        }
+    } catch (error) {
+        console.log(`[SNAPSHOT ROLES ERR] ${error.message}`);
     }
 
     for (const [, member] of guild.members.cache) {
         saveMember(member);
     }
 
-    const channels = await guild.channels.fetch();
+    try {
+        const channels = await guild.channels.fetch();
 
-    for (const [, channel] of channels) {
-        saveChannel(channel);
+        for (const [, channel] of channels) {
+            saveChannel(channel);
+        }
+    } catch (error) {
+        console.log(`[SNAPSHOT CHANNELS ERR] ${error.message}`);
     }
 
-    console.log(`[SNAPSHOT DONE] roles=${roleSnapshots.size} members=${memberRoleSnapshots.size} channels=${channelSnapshots.size}`);
+    console.log(`[SNAPSHOT DONE] ${guild.name}`);
 }
 
 async function getAuditExecutor(guild, type, targetId = null) {
@@ -307,9 +315,13 @@ async function punish(guild, executor, reason) {
         const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
 
         if (channel && channel.isTextBased()) {
-            await channel.send(
-                `@here\n\nperson : <@${executor.id}>\n\nthe reason : ${reason}\n\nID : ${executor.id}`
-            ).catch(() => {});
+            await channel.send({
+                content: `@here\n\nperson : <@${executor.id}>\n\nthe reason : ${reason}\n\nID : ${executor.id}`,
+                allowedMentions: {
+                    parse: ['everyone'],
+                    users: [executor.id],
+                },
+            }).catch(() => {});
         }
     } catch (error) {
         await sendLog(guild, `فشل العقاب: ${error.message}`);
@@ -386,7 +398,9 @@ async function restoreDeletedChannel(guild, snapshot) {
         snapshot.type === ChannelType.GuildVoice ||
         snapshot.type === ChannelType.GuildStageVoice
     ) {
-        if (snapshot.bitrate) options.bitrate = snapshot.bitrate;
+        if (snapshot.bitrate) {
+            options.bitrate = snapshot.bitrate;
+        }
 
         if (snapshot.userLimit !== null && snapshot.userLimit !== undefined) {
             options.userLimit = snapshot.userLimit;
@@ -534,10 +548,9 @@ async function handleVerifyMessageCommand(message) {
 
 async function clearMessages(interaction, amount) {
     let deletedTotal = 0;
-    let scanned = 0;
     let before = null;
 
-    while (deletedTotal < amount && scanned < amount + 300) {
+    while (deletedTotal < amount) {
         const limit = Math.min(100, amount - deletedTotal);
         const options = { limit };
 
@@ -549,349 +562,4 @@ async function clearMessages(interaction, amount) {
 
         if (messages.size === 0) break;
 
-        before = messages.last()?.id ?? null;
-        scanned += messages.size;
-
-        const deleteAmount = Math.min(amount - deletedTotal, messages.size);
-        const selected = messages.first(deleteAmount);
-
-        const deleted = await interaction.channel.bulkDelete(selected, true);
-
-        deletedTotal += deleted.size;
-
-        if (!before) break;
-
-        await wait(1000);
-    }
-
-    return deletedTotal;
-}
-
-client.once('ready', async () => {
-    console.log(`[Bot] Online as ${client.user.tag}`);
-
-    for (const [, guild] of client.guilds.cache) {
-        await registerClearCommand(guild);
-        await snapshotGuild(guild).catch((error) => {
-            console.log(`[SNAPSHOT ERR] ${error.message}`);
-        });
-    }
-
-    console.log('[Bot] Protection active');
-    console.log('[Bot] Verify active with @here');
-    console.log('[Bot] Avatar separator active');
-    console.log('[Bot] Clear command active');
-});
-
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
-    if (message.author.id === OWNER_ID) {
-        if (await handleSendCommand(message)) return;
-        if (await handleVerifyMessageCommand(message)) return;
-    }
-
-    await handleAvatarSeparator(message);
-});
-
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== CLEAR_COMMAND_NAME) return;
-
-    if (interaction.user.id !== OWNER_ID) {
-        await interaction.reply({
-            content: 'هذا الأمر للمالك فقط.',
-            ephemeral: true,
-        }).catch(() => {});
-        return;
-    }
-
-    const amount = interaction.options.getInteger('amount');
-
-    if (!amount || amount < 1 || amount > MAX_CLEAR_AMOUNT) {
-        await interaction.reply({
-            content: 'حدد رقم من 1 إلى 1000.',
-            ephemeral: true,
-        }).catch(() => {});
-        return;
-    }
-
-    if (!interaction.channel || !interaction.channel.isTextBased()) {
-        await interaction.reply({
-            content: 'هذا الأمر يشتغل في الرومات الكتابية فقط.',
-            ephemeral: true,
-        }).catch(() => {});
-        return;
-    }
-
-    await interaction.reply({
-        content: `جاري حذف ${amount} رسالة...`,
-        ephemeral: true,
-    }).catch(() => {});
-
-    try {
-        const deletedTotal = await clearMessages(interaction, amount);
-
-        await interaction.followUp({
-            content: `تم حذف ${deletedTotal} رسالة. إذا العدد أقل، فبعض الرسائل قديمة أكثر من 14 يوم أو ما عندي صلاحية حذفها.`,
-            ephemeral: true,
-        }).catch(() => {});
-    } catch (error) {
-        await interaction.followUp({
-            content: `صار خطأ أثناء الحذف: ${error.message}`,
-            ephemeral: true,
-        }).catch(() => {});
-    }
-});
-
-client.on('messageReactionAdd', async (reaction, user) => {
-    if (user.bot) return;
-
-    try {
-        if (reaction.partial) await reaction.fetch();
-        if (reaction.message.partial) await reaction.message.fetch();
-
-        if (reaction.emoji.name !== VERIFY_EMOJI) return;
-        if (!reaction.message.guild) return;
-        if (reaction.message.channelId !== VERIFY_CHANNEL_ID) return;
-        if (reaction.message.author?.id !== client.user?.id) return;
-
-        const guild = reaction.message.guild;
-        const member = await guild.members.fetch(user.id);
-
-        const verifyRole = guild.roles.cache.get(VERIFY_ROLE_ID);
-        const unverifiedRole = guild.roles.cache.get(UNVERIFIED_ROLE_ID);
-
-        if (!verifyRole) {
-            await sendLog(guild, `رتبة التفعيل غير موجودة: ${VERIFY_ROLE_ID}`);
-            return;
-        }
-
-        const key = memberKey(guild.id, member.id);
-
-        markBotAction(key);
-
-        if (unverifiedRole && member.roles.cache.has(unverifiedRole.id)) {
-            await member.roles.remove(unverifiedRole, 'Verification remove unverified').catch(() => {});
-        }
-
-        if (!member.roles.cache.has(verifyRole.id)) {
-            await member.roles.add(verifyRole, 'Verification add verified').catch(() => {});
-        }
-
-        const updated = await guild.members.fetch(user.id).catch(() => member);
-
-        saveMember(updated);
-        saveRole(verifyRole);
-
-        if (unverifiedRole) {
-            saveRole(unverifiedRole);
-        }
-
-        await sendLog(guild, `تم تفعيل العضو <@${member.id}>`);
-    } catch (error) {
-        console.log(`[VERIFY ERR] ${error.message}`);
-    }
-});
-
-client.on('roleCreate', async (role) => {
-    if (role.managed) return;
-
-    const key = roleKey(role.guild.id, role.id);
-
-    if (isBotAction(key)) {
-        saveRole(role);
-        return;
-    }
-
-    const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
-
-    if (executor && isIgnored(executor.id)) {
-        saveRole(role);
-        return;
-    }
-
-    markBotAction(key);
-
-    await role.delete('Protection rollback: unauthorized role create').catch(() => {});
-
-    roleSnapshots.delete(key);
-
-    await sendLog(role.guild, `حذفت رتبة جديدة غير مصرح بها: ${role.name}`);
-    await punish(role.guild, executor, 'اضافة رتبه جديده');
-});
-
-client.on('roleDelete', async (role) => {
-    const key = roleKey(role.guild.id, role.id);
-
-    if (isBotAction(key)) {
-        roleSnapshots.delete(key);
-        return;
-    }
-
-    const snapshot = roleSnapshots.get(key) ?? {
-        id: role.id,
-        name: role.name,
-        color: role.color,
-        hoist: role.hoist,
-        rawPosition: role.rawPosition,
-        permissions: role.permissions.bitfield.toString(),
-        mentionable: role.mentionable,
-        memberIds: [...role.members.keys()],
-    };
-
-    const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
-
-    if (executor && isIgnored(executor.id)) {
-        roleSnapshots.delete(key);
-        return;
-    }
-
-    const recreated = await restoreDeletedRole(role.guild, role.id, snapshot);
-
-    if (recreated) {
-        await sendLog(role.guild, `رجعت رتبة محذوفة: ${snapshot.name}`);
-    } else {
-        await sendLog(role.guild, `فشلت أرجع الرتبة المحذوفة: ${snapshot.name}`);
-    }
-
-    await punish(role.guild, executor, 'حذف رتبه');
-});
-
-client.on('roleUpdate', async (oldRole, newRole) => {
-    if (newRole.managed) return;
-
-    const key = roleKey(newRole.guild.id, newRole.id);
-
-    if (isBotAction(key)) {
-        saveRole(newRole);
-        return;
-    }
-
-    const snapshot = roleSnapshots.get(key);
-
-    if (!snapshot) {
-        saveRole(newRole);
-        return;
-    }
-
-    const changed =
-        newRole.name !== snapshot.name ||
-        newRole.color !== snapshot.color ||
-        newRole.hoist !== snapshot.hoist ||
-        newRole.mentionable !== snapshot.mentionable ||
-        newRole.rawPosition !== snapshot.rawPosition ||
-        newRole.permissions.bitfield.toString() !== snapshot.permissions;
-
-    if (!changed) return;
-
-    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-
-    if (executor && isIgnored(executor.id)) {
-        saveRole(newRole);
-        return;
-    }
-
-    markBotAction(key);
-
-    if (newRole.name !== snapshot.name) {
-        await newRole.setName(snapshot.name, 'Protection rollback role name').catch(() => {});
-    }
-
-    if (newRole.color !== snapshot.color) {
-        await newRole.setColor(snapshot.color, 'Protection rollback role color').catch(() => {});
-    }
-
-    if (newRole.hoist !== snapshot.hoist) {
-        await newRole.setHoist(snapshot.hoist, 'Protection rollback role hoist').catch(() => {});
-    }
-
-    if (newRole.mentionable !== snapshot.mentionable) {
-        await newRole.setMentionable(snapshot.mentionable, 'Protection rollback role mentionable').catch(() => {});
-    }
-
-    if (newRole.permissions.bitfield.toString() !== snapshot.permissions) {
-        await newRole.setPermissions(BigInt(snapshot.permissions), 'Protection rollback role permissions').catch(() => {});
-    }
-
-    if (newRole.rawPosition !== snapshot.rawPosition) {
-        await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
-    }
-
-    await sendLog(newRole.guild, `رجعت تغيير رتبة: ${snapshot.name}`);
-    await punish(newRole.guild, executor, 'تعديل رتبه');
-});
-
-client.on('channelCreate', async (channel) => {
-    if (!channel.guild) return;
-
-    const key = channelKey(channel.guild.id, channel.id);
-
-    if (isBotAction(key)) {
-        saveChannel(channel);
-        return;
-    }
-
-    const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
-
-    if (executor && isIgnored(executor.id)) {
-        saveChannel(channel);
-        return;
-    }
-
-    markBotAction(key);
-
-    await channel.delete('Protection rollback: unauthorized channel create').catch(() => {});
-
-    channelSnapshots.delete(key);
-
-    await sendLog(channel.guild, `حذفت روم جديد غير مصرح به: ${channel.name}`);
-    await punish(channel.guild, executor, 'اضافة روم');
-});
-
-client.on('channelDelete', async (channel) => {
-    if (!channel.guild) return;
-
-    const key = channelKey(channel.guild.id, channel.id);
-
-    if (isBotAction(key)) {
-        channelSnapshots.delete(key);
-        return;
-    }
-
-    const snapshot = channelSnapshots.get(key);
-
-    if (!snapshot) return;
-
-    const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
-
-    if (executor && isIgnored(executor.id)) {
-        channelSnapshots.delete(key);
-        return;
-    }
-
-    const recreated = await restoreDeletedChannel(channel.guild, snapshot);
-
-    if (recreated) {
-        await sendLog(channel.guild, `رجعت روم محذوف: ${snapshot.name}`);
-    } else {
-        await sendLog(channel.guild, `فشلت أرجع الروم المحذوف: ${snapshot.name}`);
-    }
-
-    await punish(channel.guild, executor, snapshot.type === ChannelType.GuildCategory ? 'حذف كاتوقري' : 'حذف روم');
-});
-
-client.on('channelUpdate', async (oldChannel, newChannel) => {
-    if (!newChannel.guild) return;
-
-    const key = channelKey(newChannel.guild.id, newChannel.id);
-
-    if (isBotAction(key)) {
-        saveChannel(newChannel);
-        return;
-    }
-
-    const snapshot = channelSnapshots.get(key);
-
-    if (!snapshot) {
-        saveChannel(newChannel);
+        before = messages.last()?.id
