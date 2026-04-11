@@ -335,6 +335,12 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 
     await wait(1000);
 
+    // FIX: mark ALL guild roles as bot actions before setPosition
+    // so the cascading roleUpdate events from position shifts are ignored
+    for (const [rid] of guild.roles.cache) {
+        markBotAction(roleKey(guild.id, rid), 10000);
+    }
+
     await role.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
 
     roleSnapshots.delete(roleKey(guild.id, oldRoleId));
@@ -343,7 +349,14 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         id: role.id,
     });
 
-    for (const memberId of snapshot.memberIds) {
+    // FIX: get member IDs from snapshot, or fall back to guild member cache
+    const memberIds = snapshot.memberIds && snapshot.memberIds.length > 0
+        ? snapshot.memberIds
+        : [...guild.members.cache.values()]
+            .filter((m) => m.roles.cache.has(oldRoleId))
+            .map((m) => m.id);
+
+    for (const memberId of memberIds) {
         const member = await guild.members.fetch(memberId).catch(() => null);
 
         if (!member) continue;
@@ -505,9 +518,8 @@ async function handleVerifyMessageCommand(message) {
     let text = message.content.slice('!verifymsg'.length).trim();
 
     if (!text) {
-    text = `@here\nاضغط على ${VERIFY_EMOJI} للتفعيل ودخول السيرفر.`;
-}
-
+        text = `@here\nاضغط على ${VERIFY_EMOJI} للتفعيل ودخول السيرفر.`;
+    }
 
     const channel = await client.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
 
@@ -719,18 +731,26 @@ client.on('roleDelete', async (role) => {
         return;
     }
 
+    // FIX: get memberIds from snapshot if available, otherwise from guild member cache
+    const cachedMemberIds = [...role.guild.members.cache.values()]
+        .filter((m) => m.roles.cache.has(role.id))
+        .map((m) => m.id);
+
     const snapshot = roleSnapshots.get(key) ?? {
-        ...{
-            id: role.id,
-            name: role.name,
-            color: role.color,
-            hoist: role.hoist,
-            rawPosition: role.rawPosition,
-            permissions: role.permissions.bitfield.toString(),
-            mentionable: role.mentionable,
-            memberIds: [...role.members.keys()],
-        },
+        id: role.id,
+        name: role.name,
+        color: role.color,
+        hoist: role.hoist,
+        rawPosition: role.rawPosition,
+        permissions: role.permissions.bitfield.toString(),
+        mentionable: role.mentionable,
+        memberIds: cachedMemberIds,
     };
+
+    // Make sure memberIds is always populated from cache if snapshot has none
+    if (!snapshot.memberIds || snapshot.memberIds.length === 0) {
+        snapshot.memberIds = cachedMemberIds;
+    }
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
@@ -767,12 +787,13 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         return;
     }
 
+    // FIX: removed rawPosition from changed check to prevent spam
+    // Moving a role shifts ALL other roles and causes cascade of roleUpdate events
     const changed =
         newRole.name !== snapshot.name ||
         newRole.color !== snapshot.color ||
         newRole.hoist !== snapshot.hoist ||
         newRole.mentionable !== snapshot.mentionable ||
-        newRole.rawPosition !== snapshot.rawPosition ||
         newRole.permissions.bitfield.toString() !== snapshot.permissions;
 
     if (!changed) return;
@@ -806,9 +827,8 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         await newRole.setPermissions(BigInt(snapshot.permissions), 'Protection rollback role permissions').catch(() => {});
     }
 
-    if (newRole.rawPosition !== snapshot.rawPosition) {
-        await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
-    }
+    // FIX: removed setPosition here — restoring position causes ALL roles to shift
+    // which triggers roleUpdate for every role in the server (spam + broken order)
 
     await sendLog(newRole.guild, `رجعت تغيير رتبة: ${snapshot.name}`);
     await punish(newRole.guild, executor, 'تعديل رتبه');
@@ -893,13 +913,13 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
     const currentOverwrites = JSON.stringify(channelOverwrites(newChannel));
     const oldOverwrites = JSON.stringify(snapshot.permissionOverwrites);
 
-   const changed =
-    newChannel.name !== snapshot.name ||
-    (newChannel.parentId ?? null) !== snapshot.parentId ||
-    currentOverwrites !== oldOverwrites ||
-    ('topic' in newChannel && newChannel.topic !== snapshot.topic) ||
-    ('nsfw' in newChannel && newChannel.nsfw !== snapshot.nsfw) ||
-    ('rateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser);
+    const changed =
+        newChannel.name !== snapshot.name ||
+        (newChannel.parentId ?? null) !== snapshot.parentId ||
+        currentOverwrites !== oldOverwrites ||
+        ('topic' in newChannel && newChannel.topic !== snapshot.topic) ||
+        ('nsfw' in newChannel && newChannel.nsfw !== snapshot.nsfw) ||
+        ('rateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser);
 
     if (!changed) return;
 
@@ -959,6 +979,18 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
     if (addedRoles.size === 0 && removedRoles.size === 0) return;
 
+    // FIX: filter out deleted roles (role no longer in guild cache)
+    // When a role is deleted, guildMemberUpdate fires for every member who had it
+    // Those events should be ignored here — roleDelete already handles the restore
+    const restorableAdded = addedRoles.filter(
+        (role) => !role.managed && newMember.guild.roles.cache.has(role.id)
+    );
+    const restorableRemoved = removedRoles.filter(
+        (role) => !role.managed && newMember.guild.roles.cache.has(role.id)
+    );
+
+    if (restorableAdded.size === 0 && restorableRemoved.size === 0) return;
+
     const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberRoleUpdate, newMember.id);
 
     if (executor && isIgnored(executor.id)) {
@@ -973,16 +1005,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
     markBotAction(key);
 
-    for (const [, role] of addedRoles) {
-        if (!role.managed) {
-            await newMember.roles.remove(role, 'Protection rollback unauthorized role add').catch(() => {});
-        }
+    for (const [, role] of restorableAdded) {
+        await newMember.roles.remove(role, 'Protection rollback unauthorized role add').catch(() => {});
     }
 
-    for (const [, role] of removedRoles) {
-        if (!role.managed) {
-            await newMember.roles.add(role, 'Protection rollback unauthorized role remove').catch(() => {});
-        }
+    for (const [, role] of restorableRemoved) {
+        await newMember.roles.add(role, 'Protection rollback unauthorized role remove').catch(() => {});
     }
 
     const updated = await newMember.guild.members.fetch(newMember.id).catch(() => newMember);
@@ -990,7 +1018,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     saveMember(updated);
 
     await sendLog(newMember.guild, `رجعت تغيير رتب عضو: ${newMember.user.tag}`);
-    await punish(newMember.guild, executor, addedRoles.size > 0 ? 'اضافة رتبة لشخص' : 'سحب رتبة من شخص');
+    await punish(newMember.guild, executor, restorableAdded.size > 0 ? 'اضافة رتبة لشخص' : 'سحب رتبة من شخص');
 });
 
 client.on('guildMemberAdd', async (member) => {
