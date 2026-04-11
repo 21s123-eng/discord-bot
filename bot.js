@@ -894,4 +894,4 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
     const snapshot = channelSnapshots.get(key);
 
     if (!snapshot) {
-        saveChannel(newChannel
+        saveChannel(newChannel);
