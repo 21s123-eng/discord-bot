@@ -893,14 +893,13 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
     const currentOverwrites = JSON.stringify(channelOverwrites(newChannel));
     const oldOverwrites = JSON.stringify(snapshot.permissionOverwrites);
 
-    const changed =
-        newChannel.name !== snapshot.name ||
-        (newChannel.rawPosition ?? 0) !== snapshot.rawPosition ||
-        (newChannel.parentId ?? null) !== snapshot.parentId ||
-        currentOverwrites !== oldOverwrites ||
-        ('topic' in newChannel && newChannel.topic !== snapshot.topic) ||
-        ('nsfw' in newChannel && newChannel.nsfw !== snapshot.nsfw) ||
-        ('rateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser);
+   const changed =
+    newChannel.name !== snapshot.name ||
+    (newChannel.parentId ?? null) !== snapshot.parentId ||
+    currentOverwrites !== oldOverwrites ||
+    ('topic' in newChannel && newChannel.topic !== snapshot.topic) ||
+    ('nsfw' in newChannel && newChannel.nsfw !== snapshot.nsfw) ||
+    ('rateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser);
 
     if (!changed) return;
 
@@ -938,10 +937,6 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 
     if ('setRateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser) {
         await newChannel.setRateLimitPerUser(snapshot.rateLimitPerUser ?? 0, 'Protection rollback channel slowmode').catch(() => {});
-    }
-
-    if ((newChannel.rawPosition ?? 0) !== snapshot.rawPosition) {
-        await newChannel.setPosition(snapshot.rawPosition).catch(() => {});
     }
 
     await sendLog(newChannel.guild, `رجعت تغيير روم: ${snapshot.name}`);
