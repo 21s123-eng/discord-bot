@@ -3,13 +3,35 @@ import {
     GatewayIntentBits,
     AuditLogEvent,
     ChannelType,
+    Partials,
 } from 'discord.js';
 
 const TOKEN = process.env.TOKEN;
+
 const OWNER_ID = '1125609597613375629';
 const LOG_CHANNEL_ID = '1492108809618063432';
 
-console.log('NEW CODE VERSION IMMEDIATE ROLE RESTORE');
+const VERIFY_CHANNEL_ID = '1492435148439027722';
+const VERIFY_EMOJI = '✅';
+const VERIFY_ROLE_ID = '1490108840543260763';
+const UNVERIFIED_ROLE_ID = '1491831215219806248';
+
+const AVATAR_SEPARATOR_FILE = './separator.png';
+
+const CLEAR_COMMAND_NAME = 'clear';
+const MAX_CLEAR_AMOUNT = 1000;
+
+const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
+    '1492517673584558140',
+    '1492517632186781767',
+    '1492517584158068757',
+    '1492517526012170300',
+    '1492517479170179203',
+    '1492517424325726300',
+    '1492516778071556368',
+]);
+
+console.log('NEW CODE VERSION FULL PROTECTION VERIFY AVATAR SEPARATOR CLEAR COMMAND');
 
 const client = new Client({
     intents: [
@@ -17,34 +39,73 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMessageReactions,
+    ],
+    partials: [
+        Partials.Message,
+        Partials.Channel,
+        Partials.Reaction,
     ],
 });
 
-const recentPunishments = new Map();
-const storedRolePositions = new Map();
-const storedChannelPositions = new Map();
+const roleSnapshots = new Map();
+const channelSnapshots = new Map();
+const memberRoleSnapshots = new Map();
 
-const guildRoleAuditPromises = new Map();
-const guildChannelAuditPromises = new Map();
-
+const botDeletingRoles = new Set();
 const botRestoringRoles = new Set();
-const botRestoringChannels = new Set();
+const botCreatingRoleNames = new Set();
 
-const COOLDOWN_MS = 5000;
+const botDeletingChannels = new Set();
+const botRestoringChannels = new Set();
+const botCreatingChannelNames = new Set();
+
+const botChangingMembers = new Set();
+const recentPunishments = new Map();
+
+const avatarSeparatorCooldown = new Map();
+
+const AUDIT_RETRIES = 6;
+const AUDIT_WAIT_MS = 1000;
+const PUNISH_COOLDOWN_MS = 5000;
+const AVATAR_SEPARATOR_COOLDOWN_MS = 3000;
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function roleKey(guildId, roleId) {
+    return `${guildId}:${roleId}`;
+}
+
+function roleNameKey(guildId, name) {
+    return `${guildId}:${name}`;
+}
+
+function channelKey(guildId, channelId) {
+    return `${guildId}:${channelId}`;
+}
+
+function channelNameKey(guildId, name, type) {
+    return `${guildId}:${name}:${type}`;
+}
+
+function memberKey(guildId, memberId) {
+    return `${guildId}:${memberId}`;
 }
 
 function isIgnored(userId) {
     return userId === OWNER_ID || userId === client.user?.id;
 }
 
-function isPunishmentOnCooldown(guildId, executorId, reason) {
-    const key = `${guildId}:${executorId}:${reason}`;
+function isCooldown(guildId, userId, reason) {
+    const key = `${guildId}:${userId}:${reason}`;
     const last = recentPunishments.get(key);
 
-    if (last && Date.now() - last < COOLDOWN_MS) return true;
+    if (last && Date.now() - last < PUNISH_COOLDOWN_MS) {
+        return true;
+    }
 
     recentPunishments.set(key, Date.now());
     return false;
@@ -69,80 +130,182 @@ async function log(guild, msg) {
     }
 }
 
-function printAuditDebug(entries) {
-    for (const entry of entries.slice(0, 8)) {
-        console.log(
-            `[AUDIT DEBUG] action:${entry.action} target:${entry.target?.id ?? 'none'} executor:${entry.executor?.id ?? 'none'} age:${Date.now() - entry.createdTimestamp}ms`
-        );
+function getRoleSnapshot(role) {
+    return {
+        id: role.id,
+        name: role.name,
+        color: role.color,
+        hoist: role.hoist,
+        rawPosition: role.rawPosition,
+        permissions: role.permissions.bitfield.toString(),
+        mentionable: role.mentionable,
+        managed: role.managed,
+        memberIds: [...role.members.keys()],
+    };
+}
+
+function saveRoleSnapshot(role) {
+    roleSnapshots.set(roleKey(role.guild.id, role.id), getRoleSnapshot(role));
+}
+
+function deleteRoleSnapshot(guildId, roleId) {
+    roleSnapshots.delete(roleKey(guildId, roleId));
+}
+
+function getChannelOverwrites(channel) {
+    return channel.permissionOverwrites?.cache?.map((overwrite) => ({
+        id: overwrite.id,
+        type: overwrite.type,
+        allow: overwrite.allow.bitfield.toString(),
+        deny: overwrite.deny.bitfield.toString(),
+    })) ?? [];
+}
+
+function getChannelSnapshot(channel) {
+    return {
+        id: channel.id,
+        name: channel.name,
+        type: channel.type,
+        rawPosition: channel.rawPosition ?? 0,
+        parentId: channel.parentId ?? null,
+        permissionOverwrites: getChannelOverwrites(channel),
+
+        topic: 'topic' in channel ? channel.topic : null,
+        nsfw: 'nsfw' in channel ? channel.nsfw : false,
+        rateLimitPerUser: 'rateLimitPerUser' in channel ? channel.rateLimitPerUser : 0,
+
+        bitrate: 'bitrate' in channel ? channel.bitrate : null,
+        userLimit: 'userLimit' in channel ? channel.userLimit : null,
+    };
+}
+
+function saveChannelSnapshot(channel) {
+    if (!channel.guild) return;
+    channelSnapshots.set(channelKey(channel.guild.id, channel.id), getChannelSnapshot(channel));
+}
+
+function deleteChannelSnapshot(guildId, channelId) {
+    channelSnapshots.delete(channelKey(guildId, channelId));
+}
+
+function saveMemberRoleSnapshot(member) {
+    memberRoleSnapshots.set(
+        memberKey(member.guild.id, member.id),
+        new Set(member.roles.cache.filter((role) => role.id !== member.guild.id).map((role) => role.id))
+    );
+}
+
+function replaceRoleIdInMemberSnapshots(guildId, oldRoleId, newRoleId, memberIds) {
+    for (const memberId of memberIds) {
+        const key = memberKey(guildId, memberId);
+        const roles = memberRoleSnapshots.get(key) ?? new Set();
+
+        roles.delete(oldRoleId);
+        roles.add(newRoleId);
+
+        memberRoleSnapshots.set(key, roles);
     }
 }
 
-async function fetchAuditEntries(guild, auditLogEvent) {
-    try {
-        const logs = await guild.fetchAuditLogs({
-            type: auditLogEvent,
-            limit: 20,
-        });
-
-        return [...logs.entries.values()];
-    } catch (e) {
-        console.log(`[AUDIT TYPE ERR] ${e.message}`);
-    }
-
-    try {
-        const logs = await guild.fetchAuditLogs({
-            limit: 20,
-        });
-
-        return [...logs.entries.values()];
-    } catch (e) {
-        console.log(`[AUDIT ALL ERR] ${e.message}`);
-        return [];
+function removeRoleIdFromMemberSnapshots(guildId, roleId) {
+    for (const [key, roles] of memberRoleSnapshots) {
+        if (!key.startsWith(`${guildId}:`)) continue;
+        roles.delete(roleId);
     }
 }
 
-async function getAuditExecutor(guild, auditLogEvent, targetId = null) {
-    const startTime = Date.now();
+function toOverwrites(snapshot) {
+    return snapshot.permissionOverwrites.map((overwrite) => ({
+        id: overwrite.id,
+        type: overwrite.type,
+        allow: BigInt(overwrite.allow),
+        deny: BigInt(overwrite.deny),
+    }));
+}
 
-    for (let attempt = 1; attempt <= 8; attempt++) {
-        await wait(1200);
+function messageHasImage(message) {
+    const hasImageAttachment = message.attachments.some((attachment) => {
+        if (attachment.contentType?.startsWith('image/')) return true;
+        return /\.(png|jpg|jpeg|gif|webp)$/i.test(attachment.name ?? attachment.url ?? '');
+    });
 
-        const entries = await fetchAuditEntries(guild, auditLogEvent);
+    if (hasImageAttachment) return true;
 
-        console.log(`[AUDIT] attempt ${attempt} — entries: ${entries.length}`);
+    return /(https?:\/\/\S+\.(png|jpg|jpeg|gif|webp)(\?\S*)?)/i.test(message.content);
+}
 
-        printAuditDebug(entries);
+async function handleAvatarSeparator(message) {
+    if (!AVATAR_SEPARATOR_CHANNEL_IDS.has(message.channel.id)) return;
+    if (!messageHasImage(message)) return;
 
-        let entry = null;
+    const cooldownKey = `${message.channel.id}:${message.author.id}`;
+    const last = avatarSeparatorCooldown.get(cooldownKey);
 
-        if (targetId) {
-            entry = entries.find(
-                (e) =>
-                    e.target?.id === targetId &&
-                    e.executor?.id &&
-                    e.executor.id !== client.user?.id &&
-                    e.createdTimestamp >= startTime - 20000
-            );
-        }
-
-        if (!entry) {
-            entry = entries.find(
-                (e) =>
-                    e.executor?.id &&
-                    e.executor.id !== client.user?.id &&
-                    e.createdTimestamp >= startTime - 20000
-            );
-        }
-
-        if (entry) {
-            console.log(`[AUDIT] attempt ${attempt} — found executor: ${entry.executor.id}`);
-            return entry.executor;
-        }
-
-        console.log(`[AUDIT] attempt ${attempt} — no valid executor yet`);
+    if (last && Date.now() - last < AVATAR_SEPARATOR_COOLDOWN_MS) {
+        return;
     }
 
-    console.log(`[AUDIT] gave up after 8 attempts`);
+    avatarSeparatorCooldown.set(cooldownKey, Date.now());
+
+    try {
+        await wait(700);
+
+        await message.channel.send({
+            files: [AVATAR_SEPARATOR_FILE],
+        });
+    } catch (e) {
+        console.log(`[AVATAR SEPARATOR ERR] ${e.message}`);
+        await log(message.guild, 'فشل إرسال صورة فاصل الافتارات. تأكد أن الملف موجود باسم separator.png جنب bot.js');
+    }
+}
+
+async function getAuditExecutor(guild, type, targetId = null) {
+    const minTime = Date.now() - 30000;
+
+    for (let attempt = 1; attempt <= AUDIT_RETRIES; attempt++) {
+        await wait(AUDIT_WAIT_MS);
+
+        try {
+            const logs = await guild.fetchAuditLogs({
+                type,
+                limit: 10,
+            });
+
+            const entries = [...logs.entries.values()];
+
+            console.log(`[AUDIT] type:${type} attempt:${attempt} entries:${entries.length}`);
+
+            let entry = null;
+
+            if (targetId) {
+                entry = entries.find(
+                    (e) =>
+                        e.target?.id === targetId &&
+                        e.executor?.id &&
+                        e.executor.id !== client.user?.id &&
+                        e.createdTimestamp >= minTime
+                );
+            }
+
+            if (!entry) {
+                entry = entries.find(
+                    (e) =>
+                        e.executor?.id &&
+                        e.executor.id !== client.user?.id &&
+                        e.createdTimestamp >= minTime
+                );
+            }
+
+            if (entry?.executor) {
+                console.log(`[AUDIT] found executor: ${entry.executor.id}`);
+                return entry.executor;
+            }
+        } catch (e) {
+            console.log(`[AUDIT ERR] ${e.message}`);
+        }
+    }
+
+    console.log('[AUDIT] no executor found');
     return null;
 }
 
@@ -156,9 +319,6 @@ async function removeAllRoles(member) {
 
     const botHighestPosition = botMember.roles.highest.position;
 
-    console.log(`[PUNISH] bot highest pos: ${botHighestPosition}`);
-    console.log(`[PUNISH] target highest pos: ${member.roles.highest.position}`);
-
     const removable = member.roles.cache.filter(
         (role) =>
             role.id !== member.guild.id &&
@@ -166,18 +326,23 @@ async function removeAllRoles(member) {
             role.position < botHighestPosition
     );
 
-    const notRemovable = member.roles.cache.filter(
-        (role) =>
-            role.id !== member.guild.id &&
-            (role.managed || role.position >= botHighestPosition)
-    );
+    if (removable.size === 0) {
+        return 'no_removable_roles';
+    }
 
-    console.log(`[PUNISH] removable: ${removable.map((r) => r.name).join(', ') || 'none'}`);
-    console.log(`[PUNISH] NOT removable: ${notRemovable.map((r) => r.name).join(', ') || 'none'}`);
+    const key = memberKey(member.guild.id, member.id);
 
-    if (removable.size === 0) return 'no_removable_roles';
+    botChangingMembers.add(key);
 
-    await member.roles.remove([...removable.keys()], 'Protection system');
+    setTimeout(() => {
+        botChangingMembers.delete(key);
+    }, 10000);
+
+    await member.roles.remove([...removable.keys()], 'Protection punishment');
+
+    const updatedMember = await member.guild.members.fetch(member.id).catch(() => member);
+    saveMemberRoleSnapshot(updatedMember);
+
     return `removed_${removable.size}`;
 }
 
@@ -197,550 +362,154 @@ async function sendPunishLog(guild, user, reason) {
 }
 
 async function punish(guild, executor, reason) {
-    console.log(`[PUNISH] called — executor:${executor.id} reason:${reason}`);
-
-    if (isIgnored(executor.id)) {
-        console.log('[PUNISH] ignored');
+    if (!executor) {
+        await log(guild, `رجعت التغيير، لكن ما قدرت أعرف الشخص من Audit Log — السبب: ${reason}`);
         return;
     }
 
-    if (isPunishmentOnCooldown(guild.id, executor.id, reason)) {
-        console.log('[PUNISH] cooldown');
+    if (isIgnored(executor.id)) {
+        console.log(`[PUNISH] ignored executor: ${executor.id}`);
+        return;
+    }
+
+    if (isCooldown(guild.id, executor.id, reason)) {
+        console.log(`[PUNISH] cooldown executor:${executor.id} reason:${reason}`);
         return;
     }
 
     try {
-        await log(guild, `Punishing <@${executor.id}> — ${reason}`);
-
         const member = await guild.members.fetch(executor.id);
-
-        console.log(`[PUNISH] fetched member: ${member.user.tag}`);
 
         const result = await removeAllRoles(member);
 
-        console.log(`[PUNISH] result: ${result}`);
-
-        await log(guild, `Done: ${result}`);
+        await log(guild, `عاقبت <@${executor.id}> — ${reason} — ${result}`);
         await sendPunishLog(guild, executor, reason);
     } catch (e) {
-        console.log(`[PUNISH ERR] ${e?.message ?? e}`);
-        await log(guild, `ERROR: ${e?.message ?? e}`);
+        console.log(`[PUNISH ERR] ${e.message}`);
+        await log(guild, `فشل العقاب: ${e.message}`);
     }
 }
 
-async function storeGuildRoles(guild) {
-    const roles = await guild.roles.fetch();
+async function restoreDeletedRole(guild, oldRoleId, snapshot) {
+    const recreated = await guild.roles.create({
+        name: snapshot.name,
+        color: snapshot.color,
+        hoist: snapshot.hoist,
+        permissions: BigInt(snapshot.permissions),
+        mentionable: snapshot.mentionable,
+        reason: 'Protection rollback: restore deleted role',
+    }).catch((e) => {
+        console.log(`[restoreDeletedRole create ERR] ${e.message}`);
+        return null;
+    });
 
-    for (const [, role] of roles) {
-        storedRolePositions.set(`${guild.id}:${role.id}`, role.rawPosition);
-    }
+    if (!recreated) return null;
 
-    console.log(`[STORE] ${guild.name}: stored ${roles.size} roles`);
-}
+    const recreatedKey = roleKey(guild.id, recreated.id);
 
-async function storeGuildChannels(guild) {
-    const channels = await guild.channels.fetch();
+    botRestoringRoles.add(recreatedKey);
 
-    for (const [, channel] of channels) {
-        if (channel) {
-            storedChannelPositions.set(`${guild.id}:${channel.id}`, channel.rawPosition ?? 0);
-        }
-    }
+    setTimeout(() => {
+        botRestoringRoles.delete(recreatedKey);
+    }, 10000);
 
-    console.log(`[STORE] ${guild.name}: stored ${channels.size} channels`);
-}
+    await wait(1000);
 
-client.once('clientReady', async () => {
-    console.log(`[Bot] Online as ${client.user.tag}`);
+    await recreated.setPosition(snapshot.rawPosition, { relative: false }).catch((e) => {
+        console.log(`[restoreDeletedRole setPosition ERR] ${e.message}`);
+    });
 
-    for (const [, guild] of client.guilds.cache) {
+    const newSnapshot = {
+        ...snapshot,
+        id: recreated.id,
+    };
+
+    roleSnapshots.set(recreatedKey, newSnapshot);
+    replaceRoleIdInMemberSnapshots(guild.id, oldRoleId, recreated.id, snapshot.memberIds);
+
+    for (const memberId of snapshot.memberIds) {
         try {
-            await storeGuildRoles(guild);
-        } catch (e) {
-            console.log(`[Bot] Failed roles fetch: ${e.message}`);
-        }
+            const member = await guild.members.fetch(memberId);
 
-        try {
-            await storeGuildChannels(guild);
-        } catch (e) {
-            console.log(`[Bot] Failed channels fetch: ${e.message}`);
-        }
-    }
+            const key = memberKey(guild.id, member.id);
 
-    console.log(`[Bot] Total role positions stored: ${storedRolePositions.size}`);
-    console.log(`[Bot] Total channel positions stored: ${storedChannelPositions.size}`);
-    console.log('[Bot] Protection active');
-});
-
-client.on('roleCreate', async (role) => {
-    const key = `${role.guild.id}:${role.id}`;
-    storedRolePositions.set(key, role.rawPosition);
-
-    console.log(`[roleCreate] ${role.name}`);
-
-    try {
-        const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
-
-        if (!executor) {
-            console.log('[roleCreate] no executor');
-            return;
-        }
-
-        if (isIgnored(executor.id)) {
-            console.log('[roleCreate] ignored');
-            return;
-        }
-
-        await role.delete('Protection').catch((e) => {
-            console.log(`[roleCreate delete ERR] ${e.message}`);
-        });
-
-        storedRolePositions.delete(key);
-
-        await punish(role.guild, executor, 'اضافة رتبه جديده');
-    } catch (e) {
-        console.log(`[roleCreate ERR] ${e.message}`);
-    }
-});
-
-client.on('roleDelete', async (role) => {
-    const key = `${role.guild.id}:${role.id}`;
-    const savedPosition = storedRolePositions.get(key) ?? role.rawPosition;
-
-    storedRolePositions.delete(key);
-
-    console.log(`[roleDelete] ${role.name} savedPosition:${savedPosition}`);
-
-    try {
-        const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
-
-        if (!executor) {
-            console.log('[roleDelete] no executor');
-            return;
-        }
-
-        if (isIgnored(executor.id)) {
-            console.log('[roleDelete] ignored');
-            return;
-        }
-
-        const recreated = await role.guild.roles.create({
-            name: role.name,
-            color: role.color,
-            hoist: role.hoist,
-            permissions: role.permissions,
-            mentionable: role.mentionable,
-            reason: 'Protection',
-        }).catch((e) => {
-            console.log(`[roleDelete create ERR] ${e.message}`);
-            return null;
-        });
-
-        if (recreated) {
-            storedRolePositions.set(`${role.guild.id}:${recreated.id}`, savedPosition);
-
-            await wait(1000);
-
-            await recreated.setPosition(savedPosition, { relative: false }).catch((e) => {
-                console.log(`[roleDelete setPosition ERR] ${e.message}`);
-            });
-        }
-
-        await punish(role.guild, executor, 'حذف رتبه');
-    } catch (e) {
-        console.log(`[roleDelete ERR] ${e.message}`);
-    }
-});
-
-client.on('roleUpdate', async (oldRole, newRole) => {
-    try {
-        const key = `${newRole.guild.id}:${newRole.id}`;
-        const storedPosition = storedRolePositions.get(key);
-
-        if (storedPosition === undefined) {
-            storedRolePositions.set(key, newRole.rawPosition);
-            console.log(`[roleUpdate] no stored position for ${newRole.name}, saved now`);
-            return;
-        }
-
-        const nameChanged = oldRole.name !== newRole.name;
-        const colorChanged = oldRole.color !== newRole.color;
-        const permissionsChanged = oldRole.permissions.bitfield !== newRole.permissions.bitfield;
-        const mentionableChanged = oldRole.mentionable !== newRole.mentionable;
-        const hoistChanged = oldRole.hoist !== newRole.hoist;
-        const positionChanged = storedPosition !== newRole.rawPosition;
-
-        if (
-            !nameChanged &&
-            !colorChanged &&
-            !permissionsChanged &&
-            !mentionableChanged &&
-            !hoistChanged &&
-            !positionChanged
-        ) {
-            return;
-        }
-
-        console.log(
-            `[roleUpdate] ${newRole.name} | name:${nameChanged} color:${colorChanged} perms:${permissionsChanged} mention:${mentionableChanged} hoist:${hoistChanged} pos:${positionChanged} stored:${storedPosition} new:${newRole.rawPosition}`
-        );
-
-        if (positionChanged) {
-            if (botRestoringRoles.has(newRole.guild.id)) {
-                console.log('[roleUpdate] bot restore event ignored');
-                storedRolePositions.set(key, newRole.rawPosition);
-                return;
-            }
-
-            botRestoringRoles.add(newRole.guild.id);
+            botChangingMembers.add(key);
 
             setTimeout(() => {
-                botRestoringRoles.delete(newRole.guild.id);
+                botChangingMembers.delete(key);
             }, 10000);
 
-            console.log(`[roleUpdate] restoring immediately ${newRole.name} from ${newRole.rawPosition} to ${storedPosition}`);
-
-            await log(
-                newRole.guild,
-                `Role moved: ${newRole.name} — restoring immediately from ${newRole.rawPosition} to ${storedPosition}`
-            );
-
-            await newRole.setPosition(storedPosition, { relative: false }).catch((e) => {
-                console.log(`[roleUpdate setPosition ERR] ${e.message}`);
+            await member.roles.add(recreated, 'Protection rollback: restore deleted role membership').catch((e) => {
+                console.log(`[restoreDeletedRole member add ERR] ${memberId}: ${e.message}`);
             });
 
-            storedRolePositions.set(key, storedPosition);
-
-            let executorPromise = guildRoleAuditPromises.get(newRole.guild.id);
-
-            if (!executorPromise) {
-                console.log('[roleUpdate] starting audit lookup after restore...');
-
-                executorPromise = getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, null);
-                guildRoleAuditPromises.set(newRole.guild.id, executorPromise);
-
-                setTimeout(() => {
-                    guildRoleAuditPromises.delete(newRole.guild.id);
-                }, 15000);
-            }
-
-            const executor = await executorPromise;
-
-            if (!executor) {
-                console.log('[roleUpdate] no executor — restored role but cannot punish');
-                await log(newRole.guild, 'رجعت الرتبة مكانها، لكن ما قدرت أعرف مين حرّكها من Audit Log');
-                return;
-            }
-
-            if (isIgnored(executor.id)) {
-                console.log('[roleUpdate] executor ignored');
-                return;
-            }
-
-            await punish(newRole.guild, executor, 'تغيير مكان رتبه');
-            return;
+            const updatedMember = await guild.members.fetch(memberId).catch(() => member);
+            saveMemberRoleSnapshot(updatedMember);
+        } catch (e) {
+            console.log(`[restoreDeletedRole fetch member ERR] ${memberId}: ${e.message}`);
         }
-
-        let reason = 'تعديل رتبه';
-
-        if (nameChanged) reason = 'تغيير اسم رتبه';
-        else if (colorChanged) reason = 'تغيير لون رتبه';
-        else if (permissionsChanged) reason = 'تغيير صلاحيات رتبه';
-        else if (mentionableChanged) reason = 'تغيير منشن رتبه';
-        else if (hoistChanged) reason = 'تغيير ظهور رتبه';
-
-        const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-
-        if (nameChanged) {
-            await newRole.setName(oldRole.name).catch((e) => {
-                console.log(`[roleUpdate setName ERR] ${e.message}`);
-            });
-        }
-
-        if (colorChanged) {
-            await newRole.setColor(oldRole.color).catch((e) => {
-                console.log(`[roleUpdate setColor ERR] ${e.message}`);
-            });
-        }
-
-        if (permissionsChanged) {
-            await newRole.setPermissions(oldRole.permissions).catch((e) => {
-                console.log(`[roleUpdate setPermissions ERR] ${e.message}`);
-            });
-        }
-
-        if (mentionableChanged) {
-            await newRole.setMentionable(oldRole.mentionable).catch((e) => {
-                console.log(`[roleUpdate setMentionable ERR] ${e.message}`);
-            });
-        }
-
-        if (hoistChanged) {
-            await newRole.setHoist(oldRole.hoist).catch((e) => {
-                console.log(`[roleUpdate setHoist ERR] ${e.message}`);
-            });
-        }
-
-        if (!executor) {
-            console.log('[roleUpdate] no executor for normal role update — restored only');
-            return;
-        }
-
-        if (isIgnored(executor.id)) return;
-
-        await punish(newRole.guild, executor, reason);
-    } catch (e) {
-        console.log(`[roleUpdate ERR] ${e.message}`);
     }
-});
 
-client.on('channelCreate', async (channel) => {
-    if (!channel.guild) return;
-
-    const key = `${channel.guild.id}:${channel.id}`;
-    storedChannelPositions.set(key, channel.rawPosition ?? 0);
-
-    console.log(`[channelCreate] ${channel.name}`);
-
-    try {
-        const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
-
-        if (!executor) {
-            console.log('[channelCreate] no executor');
-            return;
-        }
-
-        if (isIgnored(executor.id)) {
-            console.log('[channelCreate] ignored');
-            return;
-        }
-
-        await channel.delete('Protection').catch((e) => {
-            console.log(`[channelCreate delete ERR] ${e.message}`);
-        });
-
-        storedChannelPositions.delete(key);
-
-        await punish(channel.guild, executor, 'اضافة روم');
-    } catch (e) {
-        console.log(`[channelCreate ERR] ${e.message}`);
-    }
-});
-
-client.on('channelDelete', async (channel) => {
-    if (!channel.guild) return;
-
-    const key = `${channel.guild.id}:${channel.id}`;
-    const savedPosition = storedChannelPositions.get(key) ?? channel.rawPosition ?? 0;
-
-    storedChannelPositions.delete(key);
-
-    console.log(`[channelDelete] ${channel.name} savedPosition:${savedPosition}`);
-
-    try {
-        const isCategory = channel.type === ChannelType.GuildCategory;
-        const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
-
-        if (!executor) {
-            console.log('[channelDelete] no executor');
-            return;
-        }
-
-        if (isIgnored(executor.id)) {
-            console.log('[channelDelete] ignored');
-            return;
-        }
-
-        const overwrites = channel.permissionOverwrites?.cache?.map((o) => ({
-            id: o.id,
-            type: o.type,
-            allow: o.allow,
-            deny: o.deny,
-        })) ?? [];
-
-        const createOptions = {
-            name: channel.name,
-            type: channel.type,
-            position: savedPosition,
-            permissionOverwrites: overwrites,
-            reason: 'Protection',
-        };
-
-        if (!isCategory) {
-            if (channel.parentId) createOptions.parent = channel.parentId;
-            if (channel.topic) createOptions.topic = channel.topic;
-            if (channel.nsfw !== undefined) createOptions.nsfw = channel.nsfw;
-            if (channel.rateLimitPerUser) createOptions.rateLimitPerUser = channel.rateLimitPerUser;
-
-            if (channel.type === ChannelType.GuildVoice) {
-                if (channel.bitrate) createOptions.bitrate = channel.bitrate;
-                if (channel.userLimit) createOptions.userLimit = channel.userLimit;
-            }
-        }
-
-        const recreated = await channel.guild.channels.create(createOptions).catch((e) => {
-            console.log(`[channelDelete create ERR] ${e.message}`);
-            return null;
-        });
-
-        if (recreated) {
-            storedChannelPositions.set(`${channel.guild.id}:${recreated.id}`, savedPosition);
-        }
-
-        const reason = isCategory ? 'حذف كاتوقري' : 'حذف روم';
-
-        await punish(channel.guild, executor, reason);
-    } catch (e) {
-        console.log(`[channelDelete ERR] ${e.message}`);
-    }
-});
-
-client.on('channelUpdate', async (oldChannel, newChannel) => {
-    if (!newChannel.guild) return;
-
-    try {
-        const isCategory = newChannel.type === ChannelType.GuildCategory;
-        const key = `${newChannel.guild.id}:${newChannel.id}`;
-
-        const storedPosition = storedChannelPositions.get(key) ?? oldChannel.rawPosition ?? 0;
-
-        const nameChanged = oldChannel.name !== newChannel.name;
-        const positionChanged = storedPosition !== newChannel.rawPosition;
-
-        const oldPerms = oldChannel.permissionOverwrites?.cache;
-        const newPerms = newChannel.permissionOverwrites?.cache;
-
-        let permChanged = false;
-        let permAdded = false;
-
-        if (oldPerms && newPerms) {
-            if (newPerms.size > oldPerms.size) {
-                permChanged = true;
-                permAdded = true;
-            } else if (newPerms.size < oldPerms.size) {
-                permChanged = true;
-            } else {
-                for (const [id, newOverwrite] of newPerms) {
-                    const oldOverwrite = oldPerms.get(id);
-
-                    if (
-                        !oldOverwrite ||
-                        oldOverwrite.allow.bitfield !== newOverwrite.allow.bitfield ||
-                        oldOverwrite.deny.bitfield !== newOverwrite.deny.bitfield
-                    ) {
-                        permChanged = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!nameChanged && !positionChanged && !permChanged) return;
-
-        console.log(
-            `[channelUpdate] ${newChannel.name} | name:${nameChanged} pos:${positionChanged} perms:${permChanged} stored:${storedPosition} new:${newChannel.rawPosition}`
-        );
-
-        if (positionChanged && !nameChanged && !permChanged) {
-            if (botRestoringChannels.has(newChannel.guild.id)) {
-                console.log('[channelUpdate] bot restore event ignored');
-                storedChannelPositions.set(key, newChannel.rawPosition ?? 0);
-                return;
-            }
-
-            botRestoringChannels.add(newChannel.guild.id);
-
-            setTimeout(() => {
-                botRestoringChannels.delete(newChannel.guild.id);
-            }, 10000);
-
-            await newChannel.setPosition(storedPosition).catch((e) => {
-                console.log(`[channelUpdate setPos ERR] ${e.message}`);
-            });
-
-            storedChannelPositions.set(key, storedPosition);
-
-            let executorPromise = guildChannelAuditPromises.get(newChannel.guild.id);
-
-            if (!executorPromise) {
-                console.log('[channelUpdate] starting audit lookup after restore...');
-
-                executorPromise = getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, null);
-                guildChannelAuditPromises.set(newChannel.guild.id, executorPromise);
-
-                setTimeout(() => {
-                    guildChannelAuditPromises.delete(newChannel.guild.id);
-                }, 15000);
-            }
-
-            const executor = await executorPromise;
-
-            if (!executor) {
-                console.log('[channelUpdate] no executor — restored channel but cannot punish');
-                await log(newChannel.guild, 'رجعت الروم مكانه، لكن ما قدرت أعرف مين حرّكه من Audit Log');
-                return;
-            }
-
-            if (isIgnored(executor.id)) {
-                console.log('[channelUpdate] executor ignored');
-                return;
-            }
-
-            const reason = isCategory ? 'حرك كاتوقري' : 'حرك روم';
-
-            await punish(newChannel.guild, executor, reason);
-            return;
-        }
-
-        let reason = 'تعديل روم';
-
-        if (nameChanged) {
-            reason = 'غير اسم روم او شات';
-        } else if (permChanged) {
-            if (isCategory) {
-                reason = permAdded ? 'اضاف رتبه في كاتوقري' : 'حذف رتبه في كاتوقري';
-            } else {
-                reason = permAdded ? 'اضاف رتبه في روم او شات' : 'حذف رتبه في روم او شات';
-            }
-        }
-
-        const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
-
-        if (nameChanged) {
-            await newChannel.setName(oldChannel.name).catch((e) => {
-                console.log(`[channelUpdate setName ERR] ${e.message}`);
-            });
-        }
-
-        if (permChanged && oldPerms) {
-            await newChannel.permissionOverwrites.set(
-                oldPerms.map((o) => ({
-                    id: o.id,
-                    type: o.type,
-                    allow: o.allow,
-                    deny: o.deny,
-                }))
-            ).catch((e) => {
-                console.log(`[channelUpdate perms ERR] ${e.message}`);
-            });
-        }
-
-        if (!executor) {
-            console.log('[channelUpdate] no executor — restored only');
-            return;
-        }
-
-        if (isIgnored(executor.id)) return;
-
-        await punish(newChannel.guild, executor, reason);
-    } catch (e) {
-        console.log(`[channelUpdate ERR] ${e.message}`);
-    }
-});
-
-if (!TOKEN) {
-    console.log('[Bot] TOKEN is missing from environment variables');
-    process.exit(1);
+    return recreated;
 }
 
-client.login(TOKEN);
+async function restoreDeletedChannel(guild, snapshot) {
+    const isCategory = snapshot.type === ChannelType.GuildCategory;
+
+    const createOptions = {
+        name: snapshot.name,
+        type: snapshot.type,
+        permissionOverwrites: toOverwrites(snapshot),
+        reason: 'Protection rollback: restore deleted channel',
+    };
+
+    if (!isCategory && snapshot.parentId) {
+        createOptions.parent = snapshot.parentId;
+    }
+
+    if (
+        snapshot.type === ChannelType.GuildText ||
+        snapshot.type === ChannelType.GuildAnnouncement ||
+        snapshot.type === ChannelType.GuildForum
+    ) {
+        if (snapshot.topic !== null && snapshot.topic !== undefined) {
+            createOptions.topic = snapshot.topic;
+        }
+
+        createOptions.nsfw = snapshot.nsfw;
+        createOptions.rateLimitPerUser = snapshot.rateLimitPerUser ?? 0;
+    }
+
+    if (
+        snapshot.type === ChannelType.GuildVoice ||
+        snapshot.type === ChannelType.GuildStageVoice
+    ) {
+        if (snapshot.bitrate) createOptions.bitrate = snapshot.bitrate;
+
+        if (snapshot.userLimit !== null && snapshot.userLimit !== undefined) {
+            createOptions.userLimit = snapshot.userLimit;
+        }
+    }
+
+    const recreated = await guild.channels.create(createOptions).catch((e) => {
+        console.log(`[restoreDeletedChannel create ERR] ${e.message}`);
+        return null;
+    });
+
+    if (!recreated) return null;
+
+    const recreatedKey = channelKey(guild.id, recreated.id);
+
+    botRestoringChannels.add(recreatedKey);
+
+    setTimeout(() => {
+        botRestoringChannels.delete(recreatedKey);
+    }, 10000);
+
+    await wait(1000);
+
+    await recreated.setPosition(snapshot.rawPosition).catch((e) => {
+        console.log(`[restoreDeletedChannel setPosition ERR] ${e.message}`);
+    });
+
+    channelSnapshots.set(recreatedKey, {
