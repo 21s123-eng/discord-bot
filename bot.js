@@ -363,7 +363,7 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 
     const role = await guild.roles.create({
         name: snapshot.name,
-        color: snapshot.color,
+        color: snapshot.color ?? 0,
         hoist: snapshot.hoist,
         permissions: BigInt(snapshot.permissions),
         mentionable: snapshot.mentionable,
@@ -395,7 +395,7 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
     // memberIds is a union from all 5 sources collected in the roleDelete handler.
     const memberIds = snapshot.memberIds ?? [];
 
-    console.log(`[RESTORE MEMBERS] role=${snapshot.name} total=${memberIds.length}`);
+    console.log(`[RESTORE MEMBERS] role=${snapshot.name} members to restore=${memberIds.length}`);
 
     for (const memberId of memberIds) {
         const member = await guild.members.fetch(memberId).catch(() => null);
@@ -817,6 +817,7 @@ client.on('roleDelete', async (role) => {
     snapshot.memberIds = [...allIds];
 
     console.log(`[ROLE DELETE] ${snapshot.name} — tracked=${trackedIds.length} live=${liveIds.length} cache=${cacheIds.length} stored=${storedIds.length} buffer=${bufferedIds.length} final=${snapshot.memberIds.length}`);
+    console.log(`[ROLE DELETE] buffer keys: ${[...deletedRoleMemberBuffer.keys()].join(',')} | roleId=${role.id}`);
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
@@ -1061,8 +1062,19 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    const oldRoleIds = [...oldMember.roles.cache.keys()];
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
+
+    // Use oldMember roles if available, otherwise fall back to our stored snapshot
+    // (oldMember can be partial with empty roles cache)
+    let oldRoleIds;
+    const storedRoles = memberRoleSnapshots.get(memberKey(newMember.guild.id, newMember.id));
+    if (!oldMember.partial && oldMember.roles.cache.size > 0) {
+        oldRoleIds = [...oldMember.roles.cache.keys()];
+    } else if (storedRoles && storedRoles.size > 0) {
+        oldRoleIds = [...storedRoles];
+    } else {
+        oldRoleIds = [];
+    }
 
     for (const roleId of oldRoleIds) {
         if (roleId === newMember.guild.id) continue;
@@ -1071,7 +1083,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 deletedRoleMemberBuffer.set(roleId, new Set());
             }
             deletedRoleMemberBuffer.get(roleId).add(newMember.id);
-            console.log(`[BUFFER] Captured member ${newMember.id} for deleted role ${roleId}`);
+            console.log(`[BUFFER] Captured member ${newMember.id} for role ${roleId}`);
         }
     }
 
