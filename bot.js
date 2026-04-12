@@ -537,7 +537,7 @@ async function handleVerifyMessageCommand(message) {
     let text = message.content.slice('!verifymsg'.length).trim();
 
     if (!text) {
-        text = `*للتفعيل ودخول السيرفر اضغط على ${VERIFY_EMOJI} *\n\n@here`;
+        text = `*للتفعيل ودخول السيرفر اضغط على  ${VERIFY_EMOJI}  *\n\n@here`;
     }
 
     const channel = await client.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
@@ -752,10 +752,14 @@ client.on('roleDelete', async (role) => {
         return;
     }
 
-    // Get memberIds from guild cache (snapshot might have stale or empty list)
-    const cachedMemberIds = [...role.guild.members.cache.values()]
-        .filter((m) => m.roles.cache.has(role.id))
-        .map((m) => m.id);
+    // Capture member IDs RIGHT NOW before any async/await calls.
+    // After the audit log wait (~6s), guildMemberUpdate events will have
+    // already cleared this role from member caches — so we must read now.
+    const memberIdsNow = [...role.members.keys()].length > 0
+        ? [...role.members.keys()]
+        : [...role.guild.members.cache.values()]
+            .filter((m) => m.roles.cache.has(role.id))
+            .map((m) => m.id);
 
     const snapshot = roleSnapshots.get(key) ?? {
         id: role.id,
@@ -765,13 +769,11 @@ client.on('roleDelete', async (role) => {
         rawPosition: role.rawPosition,
         permissions: role.permissions.bitfield.toString(),
         mentionable: role.mentionable,
-        memberIds: cachedMemberIds,
+        memberIds: memberIdsNow,
     };
 
-    // Always prefer live cache for memberIds
-    if (!snapshot.memberIds || snapshot.memberIds.length === 0) {
-        snapshot.memberIds = cachedMemberIds;
-    }
+    // Always override with the freshest data captured at deletion time
+    snapshot.memberIds = memberIdsNow;
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
@@ -986,61 +988,11 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    const key = memberKey(newMember.guild.id, newMember.id);
-
-    if (isBotAction(key)) {
-        saveMember(newMember);
-        return;
-    }
-
-    const oldRoles = oldMember.roles.cache.filter((role) => role.id !== oldMember.guild.id);
-    const newRoles = newMember.roles.cache.filter((role) => role.id !== newMember.guild.id);
-
-    const addedRoles = newRoles.filter((role) => !oldRoles.has(role.id));
-    const removedRoles = oldRoles.filter((role) => !newRoles.has(role.id));
-
-    if (addedRoles.size === 0 && removedRoles.size === 0) return;
-
-    // Filter out deleted roles — when a role is deleted, guildMemberUpdate fires
-    // for every member who had it. Those events are ignored here since roleDelete
-    // already handles the restore
-    const restorableAdded = addedRoles.filter(
-        (role) => !role.managed && newMember.guild.roles.cache.has(role.id)
-    );
-    const restorableRemoved = removedRoles.filter(
-        (role) => !role.managed && newMember.guild.roles.cache.has(role.id)
-    );
-
-    if (restorableAdded.size === 0 && restorableRemoved.size === 0) return;
-
-    const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberRoleUpdate, newMember.id);
-
-    if (executor && isIgnored(executor.id, executor.bot)) {
-        saveMember(newMember);
-
-        for (const [, role] of newMember.roles.cache) {
-            saveRole(role);
-        }
-
-        return;
-    }
-
-    markBotAction(key);
-
-    for (const [, role] of restorableAdded) {
-        await newMember.roles.remove(role, 'Protection rollback unauthorized role add').catch(() => {});
-    }
-
-    for (const [, role] of restorableRemoved) {
-        await newMember.roles.add(role, 'Protection rollback unauthorized role remove').catch(() => {});
-    }
-
-    const updated = await newMember.guild.members.fetch(newMember.id).catch(() => newMember);
-
-    saveMember(updated);
-
-    await sendLog(newMember.guild, `رجعت تغيير رتب عضو: ${newMember.user.tag}`);
-    await punish(newMember.guild, executor, restorableAdded.size > 0 ? 'اضافة رتبة لشخص' : 'سحب رتبة من شخص');
+    // Only track member role changes for snapshot purposes.
+    // We do NOT reverse role additions/removals — that would block legitimate
+    // admins from giving or removing roles. Role property protection (name,
+    // color, permissions, deletion) is handled by roleCreate/roleDelete/roleUpdate.
+    saveMember(newMember);
 });
 
 client.on('guildMemberAdd', async (member) => {
