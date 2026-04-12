@@ -32,7 +32,7 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1492516778071556368',
 ]);
 
-console.log('NEW CODE VERSION - FINAL FIX v4');
+console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
 
 const client = new Client({
     intents: [
@@ -61,13 +61,13 @@ const avatarCooldowns = new Map();
 const restoringRoles = new Set();
 const restoringChannels = new Set();
 
-// FIX 1: Buffer that captures member IDs the moment a role is removed in guildMemberUpdate.
+// Buffer that captures member IDs the moment a role is removed in guildMemberUpdate.
 // Discord fires GUILD_MEMBER_UPDATE for each affected member BEFORE firing GUILD_ROLE_DELETE,
 // so this buffer captures the members while the data is still available.
 // Maps: roleId -> Set<memberId>
 const deletedRoleMemberBuffer = new Map();
 
-// FIX 2: Guild-level flag set while the bot is restoring a role position.
+// Guild-level flag set while the bot is restoring a role position.
 // Prevents cascade roleUpdate events from triggering their own (unnecessary) restores.
 const restoringPositions = new Set();
 
@@ -163,8 +163,7 @@ function saveMember(member) {
 // memberRoleSnapshots is updated on every guildMemberUpdate event.
 // Discord does NOT fire guildMemberUpdate when a role is deleted — it only
 // removes the role from member.roles.cache internally — so this map still
-// holds the pre-deletion data when roleDelete fires. This makes it the most
-// reliable source for member IDs.
+// holds the pre-deletion data when roleDelete fires.
 function getMembersWithRole(guildId, roleId) {
     const ids = [];
     const prefix = `${guildId}:member:`;
@@ -357,6 +356,8 @@ async function punish(guild, executor, reason) {
     }
 }
 
+// FIX: Removed setPosition — the role is restored without forcing it back
+// to the original position. Only the role properties and its members are restored.
 async function restoreDeletedRole(guild, oldRoleId, snapshot) {
     restoringRoles.add(guild.id);
 
@@ -390,8 +391,8 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         id: role.id,
     });
 
-    // snapshot.memberIds was already computed as the union of all 5 sources
-    // in the roleDelete handler before any awaits. Use it directly.
+    // Restore role to all members who had it before deletion.
+    // memberIds is a union from all 5 sources collected in the roleDelete handler.
     const memberIds = snapshot.memberIds ?? [];
 
     console.log(`[RESTORE MEMBERS] role=${snapshot.name} total=${memberIds.length}`);
@@ -795,25 +796,20 @@ client.on('roleDelete', async (role) => {
     // Collect member IDs from every available source and take their UNION.
     //
     // Source 1 — memberRoleSnapshots (most reliable):
-    //   Updated by saveMember on every guildMemberUpdate event. Discord does NOT
-    //   fire guildMemberUpdate when a role is deleted, so this map still contains
-    //   the pre-deletion role assignments when roleDelete fires.
     const trackedIds = getMembersWithRole(role.guild.id, role.id);
 
     // Source 2 — live role.members:
-    //   Discord.js may or may not have cleared this by the time roleDelete fires.
     const liveIds = [...role.members.keys()];
 
-    // Source 3 — guild member cache scan (backup if role.members was cleared):
+    // Source 3 — guild member cache scan:
     const cacheIds = [...role.guild.members.cache.values()]
         .filter((m) => m.roles.cache.has(role.id))
         .map((m) => m.id);
 
-    // Source 4 — stored snapshot (captured on the last saveRole call):
+    // Source 4 — stored snapshot:
     const storedIds = storedSnapshot?.memberIds ?? [];
 
-    // Source 5 — deletedRoleMemberBuffer (populated in guildMemberUpdate if Discord
-    //   does send member updates before roleDelete — empty otherwise, that's fine):
+    // Source 5 — deletedRoleMemberBuffer:
     const bufferedIds = [...(deletedRoleMemberBuffer.get(role.id) ?? [])];
 
     // Union all sources so we never miss a member regardless of event order
@@ -833,7 +829,7 @@ client.on('roleDelete', async (role) => {
     const recreated = await restoreDeletedRole(role.guild, role.id, snapshot);
 
     if (recreated) {
-        await sendLog(role.guild, `رجعت رتبة محذوفة: ${snapshot.name}`);
+        await sendLog(role.guild, `رجعت رتبة محذوفة: ${snapshot.name} — وأرجعتها لـ ${snapshot.memberIds.length} عضو`);
     } else {
         await sendLog(role.guild, `فشلت أرجع الرتبة المحذوفة: ${snapshot.name}`);
     }
@@ -868,19 +864,15 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
     if (!positionChanged && !propsChanged) return;
 
-    // FIX 2: Position-only change handling
+    // Position-only change handling
     if (positionChanged && !propsChanged) {
-        // If a position restoration is already in progress for this guild, ignore.
         if (restoringPositions.has(newRole.guild.id)) {
             saveRole(newRole);
             return;
         }
 
-        // Use non-strict lookup — we don't need to distinguish direct vs cascade here
-        // because we use the restoringPositions flag to stop any cascade loop.
         const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
-        // Check flag again after the await (another handler may have set it)
         if (restoringPositions.has(newRole.guild.id)) {
             saveRole(newRole);
             return;
@@ -896,7 +888,6 @@ client.on('roleUpdate', async (oldRole, newRole) => {
             return;
         }
 
-        // Unauthorized — restore position
         markBotAction(key);
         restoringPositions.add(newRole.guild.id);
 
@@ -904,7 +895,6 @@ client.on('roleUpdate', async (oldRole, newRole) => {
             console.log(`[RESTORE POS ERR] ${snapshot.name} — ${err.message}`);
         });
 
-        // Wait for Discord to settle all cascade events, then re-snapshot all positions
         await wait(3000);
         restoringPositions.delete(newRole.guild.id);
 
@@ -923,13 +913,7 @@ client.on('roleUpdate', async (oldRole, newRole) => {
     }
 
     // Properties changed (with or without position change)
-    const auditStrict = positionChanged && !propsChanged;
-    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id, auditStrict);
-
-    if (auditStrict && !executor) {
-        saveRole(newRole);
-        return;
-    }
+    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
     if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(newRole);
@@ -1077,16 +1061,12 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    // FIX 1: Before updating the snapshot, detect roles that were REMOVED.
-    // If a removed role no longer exists in the guild, it was just deleted.
-    // Capture the member ID in the buffer so roleDelete can use it.
     const oldRoleIds = [...oldMember.roles.cache.keys()];
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
 
     for (const roleId of oldRoleIds) {
-        if (roleId === newMember.guild.id) continue; // skip @everyone
-        if (!newRoleIds.has(roleId) && !newMember.guild.roles.cache.has(roleId)) {
-            // This role was removed AND it no longer exists → it was deleted
+        if (roleId === newMember.guild.id) continue;
+        if (!newRoleIds.has(roleId)) {
             if (!deletedRoleMemberBuffer.has(roleId)) {
                 deletedRoleMemberBuffer.set(roleId, new Set());
             }
