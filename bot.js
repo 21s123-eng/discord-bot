@@ -274,21 +274,29 @@ async function removeAllRoles(member) {
         role.position < botMember.roles.highest.position
     );
 
-    if (removable.size === 0) {
-        return 'no_removable_roles';
-    }
-
     const key = memberKey(member.guild.id, member.id);
 
     markBotAction(key);
 
-    await member.roles.remove([...removable.keys()], 'Protection punishment');
+    if (removable.size > 0) {
+        await member.roles.remove([...removable.keys()], 'Protection punishment').catch((err) => {
+            console.log(`[REMOVE ROLES ERR] ${err.message}`);
+        });
+    }
 
-    const updated = await member.guild.members.fetch(member.id).catch(() => member);
+    // Re-fetch the member after role removal so the roles cache is fresh,
+    // then add the unverified role on the updated object
+    const freshMember = await member.guild.members.fetch(member.id).catch(() => member);
+
+    await freshMember.roles.add(UNVERIFIED_ROLE_ID, 'Protection punishment: assign unverified role').catch((err) => {
+        console.log(`[ADD UNVERIFIED ROLE ERR] ${err.message}`);
+    });
+
+    const updated = await member.guild.members.fetch(member.id).catch(() => freshMember);
 
     saveMember(updated);
 
-    return `removed_${removable.size}`;
+    return `removed_${removable.size}_assigned_unverified`;
 }
 
 async function punish(guild, executor, reason) {
@@ -347,12 +355,6 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
     markBotAction(roleKey(guild.id, role.id));
 
     await wait(1000);
-
-    // Mark ALL guild roles as bot actions before setPosition so the
-    // cascading roleUpdate events from position shifts are ignored
-    for (const [rid] of guild.roles.cache) {
-        markBotAction(roleKey(guild.id, rid), 10000);
-    }
 
     await role.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
 
