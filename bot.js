@@ -58,7 +58,7 @@ const botActions = new Set();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
 
-// FIX: guild-level flags set BEFORE role/channel creation so roleCreate/channelCreate
+// Guild-level flags set BEFORE role/channel creation so roleCreate/channelCreate
 // events that fire during creation are recognized as bot actions immediately
 const restoringRoles = new Set();
 const restoringChannels = new Set();
@@ -324,7 +324,7 @@ async function punish(guild, executor, reason) {
 }
 
 async function restoreDeletedRole(guild, oldRoleId, snapshot) {
-    // FIX: mark guild as restoring BEFORE creation so the roleCreate event
+    // Mark guild as restoring BEFORE creation so the roleCreate event
     // that fires during guild.roles.create() is treated as a bot action
     restoringRoles.add(guild.id);
 
@@ -348,8 +348,8 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 
     await wait(1000);
 
-    // FIX: mark ALL guild roles as bot actions before setPosition
-    // so the cascading roleUpdate events from position shifts are ignored
+    // Mark ALL guild roles as bot actions before setPosition so the
+    // cascading roleUpdate events from position shifts are ignored
     for (const [rid] of guild.roles.cache) {
         markBotAction(roleKey(guild.id, rid), 10000);
     }
@@ -362,7 +362,7 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         id: role.id,
     });
 
-    // FIX: get member IDs from snapshot, or fall back to guild member cache
+    // Get member IDs from snapshot, or fall back to guild member cache
     const memberIds = snapshot.memberIds && snapshot.memberIds.length > 0
         ? snapshot.memberIds
         : [...guild.members.cache.values()]
@@ -387,7 +387,7 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 }
 
 async function restoreDeletedChannel(guild, snapshot) {
-    // FIX: mark guild as restoring BEFORE creation so the channelCreate event
+    // Mark guild as restoring BEFORE creation so the channelCreate event
     // that fires during guild.channels.create() is treated as a bot action
     restoringChannels.add(guild.id);
 
@@ -537,7 +537,7 @@ async function handleVerifyMessageCommand(message) {
     let text = message.content.slice('!verifymsg'.length).trim();
 
     if (!text) {
-        text = `@here\nاضغط على ${VERIFY_EMOJI} للتفعيل ودخول السيرفر.`;
+        text = `*للتفعيل ودخول السيرفر اضغط على ${VERIFY_EMOJI} *\n\n@here`;
     }
 
     const channel = await client.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
@@ -720,7 +720,7 @@ client.on('roleCreate', async (role) => {
 
     const key = roleKey(role.guild.id, role.id);
 
-    // FIX: check guild-level restore flag BEFORE isBotAction — new role ID isn't
+    // Check guild-level restore flag BEFORE isBotAction — new role ID isn't
     // known until after creation, so markBotAction can't be called in advance
     if (restoringRoles.has(role.guild.id) || isBotAction(key)) {
         saveRole(role);
@@ -752,7 +752,7 @@ client.on('roleDelete', async (role) => {
         return;
     }
 
-    // FIX: get memberIds from snapshot if available, otherwise from guild member cache
+    // Get memberIds from guild cache (snapshot might have stale or empty list)
     const cachedMemberIds = [...role.guild.members.cache.values()]
         .filter((m) => m.roles.cache.has(role.id))
         .map((m) => m.id);
@@ -768,7 +768,7 @@ client.on('roleDelete', async (role) => {
         memberIds: cachedMemberIds,
     };
 
-    // Make sure memberIds is always populated from cache if snapshot has none
+    // Always prefer live cache for memberIds
     if (!snapshot.memberIds || snapshot.memberIds.length === 0) {
         snapshot.memberIds = cachedMemberIds;
     }
@@ -808,8 +808,8 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         return;
     }
 
-    // FIX: removed rawPosition from changed check to prevent spam
-    // Moving a role shifts ALL other roles and causes cascade of roleUpdate events
+    // rawPosition excluded from changed check — moving a role shifts ALL other
+    // roles and causes a cascade of roleUpdate events (spam + broken order)
     const changed =
         newRole.name !== snapshot.name ||
         newRole.color !== snapshot.color ||
@@ -848,7 +848,7 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         await newRole.setPermissions(BigInt(snapshot.permissions), 'Protection rollback role permissions').catch(() => {});
     }
 
-    // FIX: removed setPosition here — restoring position causes ALL roles to shift
+    // setPosition removed — restoring position causes ALL roles to shift
     // which triggers roleUpdate for every role in the server (spam + broken order)
 
     await sendLog(newRole.guild, `رجعت تغيير رتبة: ${snapshot.name}`);
@@ -860,7 +860,7 @@ client.on('channelCreate', async (channel) => {
 
     const key = channelKey(channel.guild.id, channel.id);
 
-    // FIX: check guild-level restore flag BEFORE isBotAction
+    // Check guild-level restore flag BEFORE isBotAction
     if (restoringChannels.has(channel.guild.id) || isBotAction(key)) {
         saveChannel(channel);
         return;
@@ -1001,9 +1001,9 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
     if (addedRoles.size === 0 && removedRoles.size === 0) return;
 
-    // FIX: filter out deleted roles (role no longer in guild cache)
-    // When a role is deleted, guildMemberUpdate fires for every member who had it
-    // Those events should be ignored here — roleDelete already handles the restore
+    // Filter out deleted roles — when a role is deleted, guildMemberUpdate fires
+    // for every member who had it. Those events are ignored here since roleDelete
+    // already handles the restore
     const restorableAdded = addedRoles.filter(
         (role) => !role.managed && newMember.guild.roles.cache.has(role.id)
     );
