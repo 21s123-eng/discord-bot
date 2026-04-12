@@ -32,7 +32,7 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1492516778071556368',
 ]);
 
-console.log('NEW CODE VERSION - FINAL FIX v3');
+console.log('NEW CODE VERSION - FINAL FIX v4');
 
 const client = new Client({
     intents: [
@@ -157,6 +157,23 @@ function saveMember(member) {
                 .map((role) => role.id)
         )
     );
+}
+
+// Scan memberRoleSnapshots to find all members who have a given roleId.
+// memberRoleSnapshots is updated on every guildMemberUpdate event.
+// Discord does NOT fire guildMemberUpdate when a role is deleted — it only
+// removes the role from member.roles.cache internally — so this map still
+// holds the pre-deletion data when roleDelete fires. This makes it the most
+// reliable source for member IDs.
+function getMembersWithRole(guildId, roleId) {
+    const ids = [];
+    const prefix = `${guildId}:member:`;
+    for (const [key, roleSet] of memberRoleSnapshots) {
+        if (key.startsWith(prefix) && roleSet.has(roleId)) {
+            ids.push(key.slice(prefix.length));
+        }
+    }
+    return ids;
 }
 
 function channelOverwrites(channel) {
@@ -373,17 +390,11 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         id: role.id,
     });
 
-    // FIX 1: Use the buffer filled by guildMemberUpdate as the primary source.
-    // The buffer is populated before saveMember clears the data, so it's always accurate.
-    const bufferedIds = [...(deletedRoleMemberBuffer.get(oldRoleId) ?? [])];
-    deletedRoleMemberBuffer.delete(oldRoleId);
+    // snapshot.memberIds was already computed as the union of all 5 sources
+    // in the roleDelete handler before any awaits. Use it directly.
+    const memberIds = snapshot.memberIds ?? [];
 
-    // Fallback to stored snapshot if buffer is empty
-    const memberIds = bufferedIds.length > 0
-        ? bufferedIds
-        : (snapshot.memberIds ?? []);
-
-    console.log(`[RESTORE MEMBERS] role=${snapshot.name} buffered=${bufferedIds.length} stored=${snapshot.memberIds?.length ?? 0} final=${memberIds.length}`);
+    console.log(`[RESTORE MEMBERS] role=${snapshot.name} total=${memberIds.length}`);
 
     for (const memberId of memberIds) {
         const member = await guild.members.fetch(memberId).catch(() => null);
@@ -781,21 +792,35 @@ client.on('roleDelete', async (role) => {
         memberIds: [],
     };
 
-    // FIX 1: The deletedRoleMemberBuffer was populated by guildMemberUpdate
-    // events that Discord fired before this roleDelete event. At this point
-    // the buffer has the correct member IDs captured before any cache clearing.
-    // Log all sources for debugging.
-    const bufferedIds = [...(deletedRoleMemberBuffer.get(role.id) ?? [])];
+    // Collect member IDs from every available source and take their UNION.
+    //
+    // Source 1 — memberRoleSnapshots (most reliable):
+    //   Updated by saveMember on every guildMemberUpdate event. Discord does NOT
+    //   fire guildMemberUpdate when a role is deleted, so this map still contains
+    //   the pre-deletion role assignments when roleDelete fires.
+    const trackedIds = getMembersWithRole(role.guild.id, role.id);
+
+    // Source 2 — live role.members:
+    //   Discord.js may or may not have cleared this by the time roleDelete fires.
     const liveIds = [...role.members.keys()];
+
+    // Source 3 — guild member cache scan (backup if role.members was cleared):
+    const cacheIds = [...role.guild.members.cache.values()]
+        .filter((m) => m.roles.cache.has(role.id))
+        .map((m) => m.id);
+
+    // Source 4 — stored snapshot (captured on the last saveRole call):
     const storedIds = storedSnapshot?.memberIds ?? [];
 
-    console.log(`[ROLE DELETE] ${snapshot.name} — buffer=${bufferedIds.length} live=${liveIds.length} stored=${storedIds.length}`);
+    // Source 5 — deletedRoleMemberBuffer (populated in guildMemberUpdate if Discord
+    //   does send member updates before roleDelete — empty otherwise, that's fine):
+    const bufferedIds = [...(deletedRoleMemberBuffer.get(role.id) ?? [])];
 
-    // Pick the best (largest) non-empty source
-    let bestIds = storedIds;
-    if (bufferedIds.length > bestIds.length) bestIds = bufferedIds;
-    if (liveIds.length > bestIds.length) bestIds = liveIds;
-    snapshot.memberIds = [...new Set(bestIds)];
+    // Union all sources so we never miss a member regardless of event order
+    const allIds = new Set([...trackedIds, ...liveIds, ...cacheIds, ...storedIds, ...bufferedIds]);
+    snapshot.memberIds = [...allIds];
+
+    console.log(`[ROLE DELETE] ${snapshot.name} — tracked=${trackedIds.length} live=${liveIds.length} cache=${cacheIds.length} stored=${storedIds.length} buffer=${bufferedIds.length} final=${snapshot.memberIds.length}`);
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
