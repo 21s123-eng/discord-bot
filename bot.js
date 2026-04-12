@@ -378,19 +378,27 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
             .filter((m) => m.roles.cache.has(oldRoleId))
             .map((m) => m.id);
 
+    console.log(`[RESTORE MEMBERS] role=${snapshot.name} members to restore=${memberIds.length}`);
+
     for (const memberId of memberIds) {
         const member = await guild.members.fetch(memberId).catch(() => null);
 
-        if (!member) continue;
+        if (!member) {
+            console.log(`[RESTORE MEMBERS] could not fetch member ${memberId}`);
+            continue;
+        }
 
         markBotAction(memberKey(guild.id, member.id));
 
-        await member.roles.add(role, 'Protection rollback: restore role membership').catch(() => {});
+        await member.roles.add(role, 'Protection rollback: restore role membership').catch((err) => {
+            console.log(`[RESTORE MEMBERS ERR] ${member.user.tag} — ${err.message}`);
+        });
 
         const updated = await guild.members.fetch(member.id).catch(() => member);
-
         saveMember(updated);
     }
+
+    console.log(`[RESTORE MEMBERS DONE] role=${snapshot.name}`);
 
     return role;
 }
