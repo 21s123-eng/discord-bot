@@ -1,24 +1,38 @@
-import {س
-    Client,سسسي1س
+import {
+    Client,
     GatewayIntentBits,
-    AuditLogEvent,2121س
-    ChannelType,يشسي
+    AuditLogEvent,
+    ChannelType,
     Partials,
-    ApplicationCommandOptionسيششسType,يشسييشس
+    ApplicationCommandOptionType,
+} from 'discord.js';
+
+const TOKEN = process.env.TOKEN;
+
+const OWNER_ID = '1125609597613375629';
+const LOG_CHANNEL_ID = '1492108809618063432';
 
 const VERIFY_CHANNEL_ID = '1492435148439027722';
-const VERIFY_EMOJI = '✅';يشيشي
+const VERIFY_EMOJI = '✅';
+const VERIFY_ROLE_ID = '1490108840543260763';
+const UNVERIFIED_ROLE_ID = '1491831215219806248';
 
-const CLEAR_COMMAND_NAME = 'clear';شيش
+const AVATAR_SEPARATOR_FILE = './separator.png';
+
+const CLEAR_COMMAND_NAME = 'clear';
 const MAX_CLEAR_AMOUNT = 1000;
-شي
+
+const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
+    '1492517673584558140',
+    '1492517632186781767',
+    '1492517584158068757',
     '1492517526012170300',
     '1492517479170179203',
     '1492517424325726300',
     '1492516778071556368',
 ]);
 
-console.log('NEW CODE VERSION - FIXED MEMBER RESTORE + FIXED POSITION RESTORE');
+console.log('NEW CODE VERSION - FIX MEMBER RESTORE + FIX POSITION RESTORE v2');
 
 const client = new Client({
     intents: [
@@ -47,8 +61,8 @@ const avatarCooldowns = new Map();
 const restoringRoles = new Set();
 const restoringChannels = new Set();
 
-const AUDIT_RETRIES = 6;
-const AUDIT_WAIT_MS = 600;
+const AUDIT_RETRIES = 4;
+const AUDIT_WAIT_MS = 400;
 const PUNISH_COOLDOWN_MS = 5000;
 const AVATAR_SEPARATOR_COOLDOWN_MS = 3000;
 
@@ -108,8 +122,7 @@ async function sendLog(guild, text) {
 }
 
 // ===== FIX 1: Helper to get member IDs from memberRoleSnapshots =====
-// This is more reliable than role.members.keys() because memberRoleSnapshots
-// is kept up to date on every guildMemberUpdate event.
+// More reliable than role.members.keys() since it is updated on every guildMemberUpdate.
 function getRoleMemberIds(guildId, roleId) {
     const ids = [];
     const prefix = `${guildId}:member:`;
@@ -126,8 +139,7 @@ function getRoleMemberIds(guildId, roleId) {
 function saveRole(role) {
     if (!role || !role.guild || role.managed) return;
 
-    // Use tracked member IDs (from guildMemberUpdate events) as the primary source.
-    // Fall back to role.members if tracking has fewer entries.
+    // Prefer tracked member IDs (from guildMemberUpdate) over role.members cache.
     const trackedIds = getRoleMemberIds(role.guild.id, role.id);
     const liveIds = [...role.members.keys()];
     const memberIds = trackedIds.length >= liveIds.length ? trackedIds : liveIds;
@@ -204,12 +216,13 @@ async function snapshotGuild(guild) {
 
     const roles = await guild.roles.fetch();
 
-    for (const [, role] of roles) {
-        saveRole(role);
-    }
-
+    // Save members first so getRoleMemberIds works correctly inside saveRole
     for (const [, member] of guild.members.cache) {
         saveMember(member);
+    }
+
+    for (const [, role] of roles) {
+        saveRole(role);
     }
 
     const channels = await guild.channels.fetch();
@@ -221,11 +234,9 @@ async function snapshotGuild(guild) {
     console.log(`[SNAPSHOT DONE] roles=${roleSnapshots.size} members=${memberRoleSnapshots.size} channels=${channelSnapshots.size}`);
 }
 
-// ===== FIX 2: getAuditEntry returns full match info =====
-// Returns { executor, directMatch } or null.
-// directMatch = true means the audit entry's target matches targetId exactly.
-// directMatch = false means we found an entry but for a different target (cascade).
-async function getAuditEntry(guild, type, targetId = null) {
+// Original getAuditExecutor — kept as-is for delete/create events where
+// using a fallback audit entry could cause false-positive owner matches.
+async function getAuditExecutor(guild, type, targetId = null, strict = false) {
     const minTime = Date.now() - 30000;
 
     for (let i = 0; i < AUDIT_RETRIES; i++) {
@@ -235,29 +246,27 @@ async function getAuditEntry(guild, type, targetId = null) {
             const logs = await guild.fetchAuditLogs({ type, limit: 10 });
             const entries = [...logs.entries.values()];
 
-            // First: look for an entry matching this specific target
+            let entry = null;
+
             if (targetId) {
-                const directEntry = entries.find((item) =>
+                entry = entries.find((item) =>
                     item.target?.id === targetId &&
                     item.executor?.id &&
                     item.executor.id !== client.user?.id &&
                     item.createdTimestamp >= minTime
                 );
-
-                if (directEntry) {
-                    return { executor: directEntry.executor, directMatch: true };
-                }
             }
 
-            // Second: look for any recent entry of this type
-            const anyEntry = entries.find((item) =>
-                item.executor?.id &&
-                item.executor.id !== client.user?.id &&
-                item.createdTimestamp >= minTime
-            );
+            if (!entry && !strict) {
+                entry = entries.find((item) =>
+                    item.executor?.id &&
+                    item.executor.id !== client.user?.id &&
+                    item.createdTimestamp >= minTime
+                );
+            }
 
-            if (anyEntry) {
-                return { executor: anyEntry.executor, directMatch: targetId ? false : true };
+            if (entry?.executor) {
+                return entry.executor;
             }
         } catch (error) {
             console.log(`[AUDIT ERR] ${error.message}`);
@@ -267,10 +276,49 @@ async function getAuditEntry(guild, type, targetId = null) {
     return null;
 }
 
-// Legacy wrapper for places that only need the executor (non-position events)
-async function getAuditExecutor(guild, type, targetId = null) {
-    const result = await getAuditEntry(guild, type, targetId);
-    return result?.executor ?? null;
+// ===== FIX 2: Separate audit lookup for role position changes =====
+// Returns { executor, directMatch } or null.
+// directMatch=true  → this exact role was the one directly moved
+// directMatch=false → another role was moved, this is a cascade shift
+async function getAuditEntryForPositionChange(guild, targetRoleId) {
+    const minTime = Date.now() - 30000;
+
+    for (let i = 0; i < AUDIT_RETRIES; i++) {
+        if (i > 0) await wait(AUDIT_WAIT_MS);
+
+        try {
+            const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.RoleUpdate, limit: 10 });
+            const entries = [...logs.entries.values()];
+
+            // Look for an entry targeting this specific role
+            const directEntry = entries.find((item) =>
+                item.target?.id === targetRoleId &&
+                item.executor?.id &&
+                item.executor.id !== client.user?.id &&
+                item.createdTimestamp >= minTime
+            );
+
+            if (directEntry) {
+                return { executor: directEntry.executor, directMatch: true };
+            }
+
+            // Look for any recent role update entry (to know if it's a cascade)
+            const anyEntry = entries.find((item) =>
+                item.executor?.id &&
+                item.executor.id !== client.user?.id &&
+                item.createdTimestamp >= minTime
+            );
+
+            if (anyEntry) {
+                // Found an entry but for a different role — this is a cascade shift
+                return { executor: anyEntry.executor, directMatch: false };
+            }
+        } catch (error) {
+            console.log(`[AUDIT ERR] ${error.message}`);
+        }
+    }
+
+    return null;
 }
 
 async function removeAllRoles(member) {
@@ -383,30 +431,16 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         id: role.id,
     });
 
-    // ===== FIX 1: Get member IDs from all available sources =====
-    // Priority: live role.members → memberRoleSnapshots → stored snapshot.memberIds
-    const liveIds = [...role.members.keys()];
+    // ===== FIX 1: Use memberIds already captured in the roleDelete handler =====
+    // snapshot.memberIds was set before any awaits in roleDelete, so it has the
+    // correct member list before Discord had a chance to clear the caches.
+    const memberIds = snapshot.memberIds && snapshot.memberIds.length > 0
+        ? snapshot.memberIds
+        : [...guild.members.cache.values()]
+            .filter((m) => m.roles.cache.has(oldRoleId))
+            .map((m) => m.id);
 
-    // At this point memberRoleSnapshots still has the old role ID for members
-    // because guildMemberUpdate fires after roleDelete in Discord's event order.
-    const trackedIds = getRoleMemberIds(guild.id, oldRoleId);
-
-    const storedIds = snapshot.memberIds ?? [];
-
-    // Merge all sources — use whichever set is largest
-    let memberIds;
-    if (liveIds.length > 0) {
-        memberIds = liveIds;
-    } else if (trackedIds.length > 0) {
-        memberIds = trackedIds;
-    } else {
-        memberIds = storedIds;
-    }
-
-    // Deduplicate
-    memberIds = [...new Set(memberIds)];
-
-    console.log(`[RESTORE MEMBERS] role=${snapshot.name} live=${liveIds.length} tracked=${trackedIds.length} stored=${storedIds.length} final=${memberIds.length}`);
+    console.log(`[RESTORE MEMBERS] role=${snapshot.name} members to restore=${memberIds.length}`);
 
     for (const memberId of memberIds) {
         const member = await guild.members.fetch(memberId).catch(() => null);
@@ -791,19 +825,18 @@ client.on('roleDelete', async (role) => {
         return;
     }
 
-    // ===== FIX 1: Capture member IDs from ALL sources before any await =====
-    // Source 1: live role.members (may be empty if Discord already cleared cache)
+    // ===== FIX 1: Capture member IDs synchronously from ALL sources BEFORE any await =====
+    // Source 1: live role.members
     const liveIds = [...role.members.keys()];
 
-    // Source 2: guild member cache filter (backup if role.members is empty)
+    // Source 2: guild member cache filter (fallback if role.members already cleared)
     const cacheIds = liveIds.length > 0
         ? liveIds
         : [...role.guild.members.cache.values()]
             .filter((m) => m.roles.cache.has(role.id))
             .map((m) => m.id);
 
-    // Source 3: memberRoleSnapshots — tracked from guildMemberUpdate events.
-    // This is the most reliable source because it's kept up-to-date independently.
+    // Source 3: memberRoleSnapshots — updated on every guildMemberUpdate, most reliable
     const trackedIds = getRoleMemberIds(role.guild.id, role.id);
 
     const storedSnapshot = roleSnapshots.get(key);
@@ -819,11 +852,13 @@ client.on('roleDelete', async (role) => {
         memberIds: [],
     };
 
-    // Merge all sources and deduplicate — use the largest set available
+    // Pick the source with the most member IDs, then deduplicate
     const storedIds = storedSnapshot?.memberIds ?? [];
-    const allSources = [cacheIds, trackedIds, storedIds];
-    const largest = allSources.reduce((a, b) => (b.length > a.length ? b : a), []);
-    snapshot.memberIds = [...new Set([...largest])];
+    const bestSource = [cacheIds, trackedIds, storedIds].reduce(
+        (best, src) => (src.length > best.length ? src : best),
+        []
+    );
+    snapshot.memberIds = [...new Set(bestSource)];
 
     console.log(`[ROLE DELETE] ${snapshot.name} — live=${liveIds.length} cache=${cacheIds.length} tracked=${trackedIds.length} stored=${storedIds.length} final=${snapshot.memberIds.length}`);
 
@@ -872,34 +907,31 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
     if (!positionChanged && !propsChanged) return;
 
-    // ===== FIX 2: Improved position change detection =====
-    // For position-only changes, use getAuditEntry which returns directMatch info.
-    // directMatch=true  → this exact role was moved → restore + punish
-    // directMatch=false → another role was moved, this is a cascade shift → just save
-    // result=null       → no audit entry found at all → treat as cascade, save and skip
+    // ===== FIX 2: Better position-only change handling =====
     if (positionChanged && !propsChanged) {
-        const result = await getAuditEntry(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
+        const result = await getAuditEntryForPositionChange(newRole.guild, newRole.id);
 
         if (!result) {
-            // No audit entry found — unknown origin, treat as cascade
-            console.log(`[ROLE POS] ${snapshot.name} — no audit entry found, treating as cascade`);
+            // No audit entry at all — treat as cascade, save and skip
+            console.log(`[ROLE POS] ${snapshot.name} — no audit entry, treating as cascade`);
             saveRole(newRole);
             return;
         }
 
         if (!result.directMatch) {
-            // Another role was moved; this role shifted as a side effect
-            console.log(`[ROLE POS] ${snapshot.name} — cascade shift, not directly moved`);
+            // Another role was directly moved, this one shifted as a cascade
+            console.log(`[ROLE POS] ${snapshot.name} — cascade shift, skipping`);
             saveRole(newRole);
             return;
         }
 
+        // This role was directly moved
         if (isIgnored(result.executor.id, result.executor.bot)) {
             saveRole(newRole);
             return;
         }
 
-        // This role was directly moved by an unauthorized person — restore its position
+        // Unauthorized direct position change — restore
         markBotAction(key);
 
         await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch((err) => {
@@ -911,9 +943,8 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         return;
     }
 
-    // Properties changed (name/color/perms/etc.) — may also have position change
-    const result = await getAuditEntry(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-    const executor = result?.executor ?? null;
+    // Properties changed (with or without position change)
+    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
     if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(newRole);
