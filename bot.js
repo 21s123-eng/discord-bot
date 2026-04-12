@@ -217,7 +217,7 @@ async function snapshotGuild(guild) {
     console.log(`[SNAPSHOT DONE] roles=${roleSnapshots.size} members=${memberRoleSnapshots.size} channels=${channelSnapshots.size}`);
 }
 
-async function getAuditExecutor(guild, type, targetId = null) {
+async function getAuditExecutor(guild, type, targetId = null, strict = false) {
     const minTime = Date.now() - 30000;
 
     for (let i = 0; i < AUDIT_RETRIES; i++) {
@@ -242,7 +242,9 @@ async function getAuditExecutor(guild, type, targetId = null) {
                 );
             }
 
-            if (!entry) {
+            // strict mode: only match if audit entry target matches exactly.
+            // Used to distinguish a directly-moved role from cascade shifts.
+            if (!entry && !strict) {
                 entry = entries.find((item) =>
                     item.executor?.id &&
                     item.executor.id !== client.user?.id &&
@@ -820,18 +822,28 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         return;
     }
 
-    // rawPosition excluded from changed check — moving a role shifts ALL other
-    // roles and causes a cascade of roleUpdate events (spam + broken order)
-    const changed =
+    const positionChanged = newRole.rawPosition !== snapshot.rawPosition;
+    const propsChanged =
         newRole.name !== snapshot.name ||
         newRole.color !== snapshot.color ||
         newRole.hoist !== snapshot.hoist ||
         newRole.mentionable !== snapshot.mentionable ||
         newRole.permissions.bitfield.toString() !== snapshot.permissions;
 
-    if (!changed) return;
+    if (!positionChanged && !propsChanged) return;
 
-    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
+    // For position-only changes use strict audit lookup so cascade shifts
+    // (other roles moving because one role moved) are ignored — they won't
+    // have their own audit entry and strict=true returns null for them.
+    const auditStrict = positionChanged && !propsChanged;
+    const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id, auditStrict);
+
+    // Cascade shift: audit returned nothing (strict lookup found no entry for
+    // this specific role). Just save the new position and move on.
+    if (auditStrict && !executor) {
+        saveRole(newRole);
+        return;
+    }
 
     if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(newRole);
@@ -860,8 +872,9 @@ client.on('roleUpdate', async (oldRole, newRole) => {
         await newRole.setPermissions(BigInt(snapshot.permissions), 'Protection rollback role permissions').catch(() => {});
     }
 
-    // setPosition removed — restoring position causes ALL roles to shift
-    // which triggers roleUpdate for every role in the server (spam + broken order)
+    if (positionChanged) {
+        await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
+    }
 
     await sendLog(newRole.guild, `رجعت تغيير رتبة: ${snapshot.name}`);
     await punish(newRole.guild, executor, 'تعديل رتبه');
