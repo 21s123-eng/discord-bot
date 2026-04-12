@@ -990,11 +990,18 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-    // Only track member role changes for snapshot purposes.
-    // We do NOT reverse role additions/removals — that would block legitimate
-    // admins from giving or removing roles. Role property protection (name,
-    // color, permissions, deletion) is handled by roleCreate/roleDelete/roleUpdate.
     saveMember(newMember);
+
+    if (newMember.user.bot) return;
+
+    // Auto-assign unverified role to any member who ends up with no roles
+    const nonEveryoneRoles = newMember.roles.cache.filter((r) => r.id !== newMember.guild.id);
+
+    if (nonEveryoneRoles.size === 0) {
+        await newMember.roles.add(UNVERIFIED_ROLE_ID, 'Auto-assign: member has no roles').catch((err) => {
+            console.log(`[AUTO UNVERIFIED ERR] ${err.message}`);
+        });
+    }
 });
 
 client.on('guildMemberAdd', async (member) => {
