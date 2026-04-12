@@ -1,31 +1,17 @@
-import {
-    Client,
+import {س
+    Client,سسسي1س
     GatewayIntentBits,
-    AuditLogEvent,
-    ChannelType,
+    AuditLogEvent,2121س
+    ChannelType,يشسي
     Partials,
-    ApplicationCommandOptionType,
-} from 'discord.js';
-
-const TOKEN = process.env.TOKEN;
-
-const OWNER_ID = '1125609597613375629';
-const LOG_CHANNEL_ID = '1492108809618063432';
+    ApplicationCommandOptionسيششسType,يشسييشس
 
 const VERIFY_CHANNEL_ID = '1492435148439027722';
-const VERIFY_EMOJI = '✅';
-const VERIFY_ROLE_ID = '1490108840543260763';
-const UNVERIFIED_ROLE_ID = '1491831215219806248';
+const VERIFY_EMOJI = '✅';يشيشي
 
-const AVATAR_SEPARATOR_FILE = './separator.png';
-
-const CLEAR_COMMAND_NAME = 'clear';
+const CLEAR_COMMAND_NAME = 'clear';شيش
 const MAX_CLEAR_AMOUNT = 1000;
-
-const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
-    '1492517673584558140',
-    '1492517632186781767',
-    '1492517584158068757',
+شي
     '1492517526012170300',
     '1492517479170179203',
     '1492517424325726300',
