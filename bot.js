@@ -93,8 +93,10 @@ function isBotAction(key) {
     return botActions.has(key);
 }
 
-function isIgnored(userId) {
-    return userId === OWNER_ID || userId === client.user?.id;
+function isIgnored(userId, isBot = false) {
+    // Trust the owner, the protection bot itself, and any other bots
+    // (ticket bots, role bots, etc. create channels/roles legitimately)
+    return userId === OWNER_ID || userId === client.user?.id || isBot;
 }
 
 function punishOnCooldown(guildId, userId, reason) {
@@ -295,7 +297,7 @@ async function punish(guild, executor, reason) {
         return;
     }
 
-    if (isIgnored(executor.id)) {
+    if (isIgnored(executor.id, executor.bot)) {
         return;
     }
 
@@ -727,7 +729,7 @@ client.on('roleCreate', async (role) => {
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(role);
         return;
     }
@@ -773,7 +775,7 @@ client.on('roleDelete', async (role) => {
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         roleSnapshots.delete(key);
         return;
     }
@@ -819,7 +821,7 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
     const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(newRole);
         return;
     }
@@ -866,7 +868,7 @@ client.on('channelCreate', async (channel) => {
 
     const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         saveChannel(channel);
         return;
     }
@@ -897,7 +899,7 @@ client.on('channelDelete', async (channel) => {
 
     const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         channelSnapshots.delete(key);
         return;
     }
@@ -945,7 +947,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 
     const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         saveChannel(newChannel);
         return;
     }
@@ -1013,7 +1015,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
 
     const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberRoleUpdate, newMember.id);
 
-    if (executor && isIgnored(executor.id)) {
+    if (executor && isIgnored(executor.id, executor.bot)) {
         saveMember(newMember);
 
         for (const [, role] of newMember.roles.cache) {
