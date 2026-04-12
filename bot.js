@@ -846,15 +846,11 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
     if (!positionChanged && !propsChanged) return;
 
-    console.log(`[ROLE UPDATE] ${newRole.name} posChanged=${positionChanged}(${snapshot.rawPosition}→${newRole.rawPosition}) propsChanged=${propsChanged}`);
-
     // For position-only changes use strict audit lookup so cascade shifts
     // (other roles moving because one role moved) are ignored — they won't
     // have their own audit entry and strict=true returns null for them.
     const auditStrict = positionChanged && !propsChanged;
     const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id, auditStrict);
-
-    console.log(`[ROLE UPDATE] ${newRole.name} auditStrict=${auditStrict} executor=${executor?.id ?? 'null'}`);
 
     // Cascade shift: audit returned nothing (strict lookup found no entry for
     // this specific role). Just save the new position and move on.
@@ -880,10 +876,7 @@ client.on('roleUpdate', async (oldRole, newRole) => {
     }, 'Protection rollback role').catch(() => {});
 
     if (positionChanged) {
-        console.log(`[ROLE UPDATE] restoring position of ${newRole.name} to ${snapshot.rawPosition}`);
-        await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch((err) => {
-            console.log(`[ROLE UPDATE SET POS ERR] ${newRole.name} — ${err.message}`);
-        });
+        await newRole.setPosition(snapshot.rawPosition, { relative: false }).catch(() => {});
     }
 
     await sendLog(newRole.guild, `رجعت تغيير رتبة: ${snapshot.name}`);
