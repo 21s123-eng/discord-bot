@@ -265,6 +265,7 @@ async function removeAllRoles(member) {
     const botMember = member.guild.members.me;
 
     if (!botMember) {
+        console.log(`[PUNISH] bot member not found in guild`);
         return 'bot_member_not_found';
     }
 
@@ -274,27 +275,34 @@ async function removeAllRoles(member) {
         role.position < botMember.roles.highest.position
     );
 
-    const key = memberKey(member.guild.id, member.id);
+    console.log(`[PUNISH] ${member.user.tag} — removing ${removable.size} roles: ${[...removable.values()].map(r => r.name).join(', ') || 'none'}`);
 
+    const key = memberKey(member.guild.id, member.id);
     markBotAction(key);
 
     if (removable.size > 0) {
         await member.roles.remove([...removable.keys()], 'Protection punishment').catch((err) => {
-            console.log(`[REMOVE ROLES ERR] ${err.message}`);
+            console.log(`[PUNISH REMOVE ERR] ${err.message}`);
         });
     }
 
-    // Re-fetch the member after role removal so the roles cache is fresh,
-    // then add the unverified role on the updated object
-    const freshMember = await member.guild.members.fetch(member.id).catch(() => member);
+    // Re-fetch to get accurate post-removal state
+    const fresh = await member.guild.members.fetch(member.id).catch(() => null);
 
-    await freshMember.roles.add(UNVERIFIED_ROLE_ID, 'Protection punishment: assign unverified role').catch((err) => {
-        console.log(`[ADD UNVERIFIED ROLE ERR] ${err.message}`);
+    if (!fresh) {
+        console.log(`[PUNISH] could not re-fetch member after role removal`);
+        return `removed_${removable.size}`;
+    }
+
+    const remaining = fresh.roles.cache.filter((r) => r.id !== fresh.guild.id);
+
+    console.log(`[PUNISH] ${member.user.tag} — roles after removal: ${remaining.size} — adding unverified role`);
+
+    await fresh.roles.add(UNVERIFIED_ROLE_ID, 'Protection punishment: assign unverified role').catch((err) => {
+        console.log(`[PUNISH ADD UNVERIFIED ERR] ${err.message}`);
     });
 
-    const updated = await member.guild.members.fetch(member.id).catch(() => freshMember);
-
-    saveMember(updated);
+    saveMember(fresh);
 
     return `removed_${removable.size}_assigned_unverified`;
 }
@@ -998,8 +1006,9 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const nonEveryoneRoles = newMember.roles.cache.filter((r) => r.id !== newMember.guild.id);
 
     if (nonEveryoneRoles.size === 0) {
+        console.log(`[AUTO UNVERIFIED] ${newMember.user.tag} has no roles — assigning unverified`);
         await newMember.roles.add(UNVERIFIED_ROLE_ID, 'Auto-assign: member has no roles').catch((err) => {
-            console.log(`[AUTO UNVERIFIED ERR] ${err.message}`);
+            console.log(`[AUTO UNVERIFIED ERR] ${newMember.user.tag} — ${err.message}`);
         });
     }
 });
