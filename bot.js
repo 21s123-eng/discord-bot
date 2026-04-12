@@ -8,6 +8,7 @@ import {
 } from 'discord.js';
 
 const TOKEN = process.env.TOKEN;
+ز
 
 const OWNER_ID = '1125609597613375629';
 const LOG_CHANNEL_ID = '1492108809618063432';
