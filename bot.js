@@ -769,16 +769,18 @@ client.on('roleDelete', async (role) => {
         return;
     }
 
-    // Capture member IDs RIGHT NOW before any async/await calls.
-    // After the audit log wait (~6s), guildMemberUpdate events will have
-    // already cleared this role from member caches — so we must read now.
-    const memberIdsNow = [...role.members.keys()].length > 0
-        ? [...role.members.keys()]
+    // Capture member IDs synchronously before any await — Discord.js may clear
+    // role.members later when GUILD_MEMBER_UPDATE events arrive.
+    const memberIdsFromRole = [...role.members.keys()];
+    const memberIdsFromCache = memberIdsFromRole.length > 0
+        ? memberIdsFromRole
         : [...role.guild.members.cache.values()]
             .filter((m) => m.roles.cache.has(role.id))
             .map((m) => m.id);
 
-    const snapshot = roleSnapshots.get(key) ?? {
+    const storedSnapshot = roleSnapshots.get(key);
+
+    const snapshot = storedSnapshot ?? {
         id: role.id,
         name: role.name,
         color: role.color,
@@ -786,11 +788,18 @@ client.on('roleDelete', async (role) => {
         rawPosition: role.rawPosition,
         permissions: role.permissions.bitfield.toString(),
         mentionable: role.mentionable,
-        memberIds: memberIdsNow,
+        memberIds: [],
     };
 
-    // Always override with the freshest data captured at deletion time
-    snapshot.memberIds = memberIdsNow;
+    // Only replace stored memberIds if the live capture found members.
+    // If Discord.js already cleared the cache, the stored snapshot has better data.
+    if (memberIdsFromCache.length > 0) {
+        snapshot.memberIds = memberIdsFromCache;
+    } else if (!snapshot.memberIds || snapshot.memberIds.length === 0) {
+        snapshot.memberIds = storedSnapshot?.memberIds ?? [];
+    }
+
+    console.log(`[ROLE DELETE] ${snapshot.name} — memberIds from live=${memberIdsFromCache.length} stored=${storedSnapshot?.memberIds?.length ?? 0} final=${snapshot.memberIds.length}`);
 
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleDelete, role.id);
 
