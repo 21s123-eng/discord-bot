@@ -60,6 +60,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMessageReactions,
+        GatewayIntentBits.GuildVoiceStates,
     ],
     partials: [
         Partials.Message,
@@ -1128,19 +1129,25 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     } else {
         oldRoleIds = [];
     }
-        // لوق إضافة/سحب الرتب
+            // لوق إضافة/سحب الرتب
     const roleLogChannel = newMember.guild.channels.cache.get(ROLE_LOG_CHANNEL_ID);
     if (roleLogChannel && roleLogChannel.isTextBased()) {
         const oldRoleSet = storedRoles ?? new Set();
         const added = [...newMember.roles.cache.keys()].filter(id => id !== newMember.guild.id && !oldRoleSet.has(id));
         const removed = [...(storedRoles ?? new Set())].filter(id => id !== newMember.guild.id && !newRoleIds.has(id));
-        for (const roleId of added) {
-            const role = newMember.guild.roles.cache.get(roleId);
-            await roleLogChannel.send(`تمت إضافة رتبة **${role?.name ?? roleId}** لـ <@${newMember.id}>`).catch(() => {});
-        }
-        for (const roleId of removed) {
-            const role = newMember.guild.roles.cache.get(roleId);
-            await roleLogChannel.send(`تمت إزالة رتبة **${role?.name ?? roleId}** من <@${newMember.id}>`).catch(() => {});
+
+        if (added.length > 0 || removed.length > 0) {
+            const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberRoleUpdate, newMember.id, true);
+            const executorText = executor ? `بواسطة <@${executor.id}>` : 'بواسطة غير معروف';
+
+            for (const roleId of added) {
+                const role = newMember.guild.roles.cache.get(roleId);
+                await roleLogChannel.send(`تمت إضافة رتبة **${role?.name ?? roleId}** لـ <@${newMember.id}> ${executorText}`).catch(() => {});
+            }
+            for (const roleId of removed) {
+                const role = newMember.guild.roles.cache.get(roleId);
+                await roleLogChannel.send(`تمت إزالة رتبة **${role?.name ?? roleId}** من <@${newMember.id}> ${executorText}`).catch(() => {});
+            }
         }
     }
 
