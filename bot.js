@@ -537,16 +537,23 @@ async function handleSendCommand(message) {
     const args = message.content.slice('!send '.length).trim();
     const firstSpace = args.indexOf(' ');
 
-    if (firstSpace === -1) {
-        await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة`').catch(() => {});
+    const hasAttachments = message.attachments.size > 0;
+
+    if (firstSpace === -1 && !hasAttachments) {
+        await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة` أو أرفق صورة').catch(() => {});
         return true;
     }
 
-    const channelId = args.slice(0, firstSpace).replace('<#', '').replace('>', '').trim();
-    const text = args.slice(firstSpace + 1).trim();
+    const channelId = (firstSpace === -1 ? args : args.slice(0, firstSpace)).replace('<#', '').replace('>', '').trim();
+    const text = firstSpace === -1 ? '' : args.slice(firstSpace + 1).trim();
 
-    if (!channelId || !text) {
-        await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة`').catch(() => {});
+    if (!channelId) {
+        await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة` أو أرفق صورة').catch(() => {});
+        return true;
+    }
+
+    if (!text && !hasAttachments) {
+        await message.reply('اكتب رسالة أو أرفق صورة.').catch(() => {});
         return true;
     }
 
@@ -557,7 +564,20 @@ async function handleSendCommand(message) {
         return true;
     }
 
-    await channel.send(text);
+    const sendPayload = {};
+
+    if (text) {
+        sendPayload.content = text;
+    }
+
+    if (hasAttachments) {
+        sendPayload.files = message.attachments.map((attachment) => ({
+            attachment: attachment.url,
+            name: attachment.name,
+        }));
+    }
+
+    await channel.send(sendPayload);
     await message.reply('تم إرسال الرسالة.').catch(() => {});
 
     return true;
