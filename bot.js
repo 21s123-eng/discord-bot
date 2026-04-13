@@ -1,5 +1,5 @@
-import {sa
-    Client,1111ssa
+import {
+    Client,
     GatewayIntentBits,
     AuditLogEvent,
     ChannelType,
@@ -19,6 +19,24 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
+const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
+const WAIT_ROOM_ID = '1493287394466861317';
+const MEET_ROOM_ID = '1493287347788185742';
+const ADMIN_VOICE_CHANNELS = new Set([
+    '1492450097462771833',
+    '1492450059307192381',
+    '1492450015703076884',
+    '1492449967535816744',
+    '1492449717186072606',
+    '1492449616761852095',
+    '1492449475912925214',
+    '1492449422230032535',
+    '1492449365611249715',
+    '1492449319184502794',
+]);
+
+const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEAR_COMMAND_NAME = 'clear';
 const MAX_CLEAR_AMOUNT = 1000;
 
@@ -670,6 +688,28 @@ client.once('ready', async () => {
 });
 
 client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.guild) return;
+
+    if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID) {
+        try {
+            await message.delete().catch(() => {});
+            const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+            if (member) {
+                await member.timeout(ONE_WEEK_MS, 'إرسال رابط').catch(() => {});
+            }
+            const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+            if (logChannel && logChannel.isTextBased()) {
+                await logChannel.send(
+                    `تم إعطاء تايم اوت أسبوع لـ <@${message.author.id}>\nالسبب: إرسال رابط`
+                ).catch(() => {});
+            }
+        } catch (err) {
+            console.log(`[LINK TIMEOUT ERR] ${err.message}`);
+        }
+        return;
+    }
+
     if (message.author.id === OWNER_ID) {
         if (await handleSendCommand(message)) return;
         if (await handleVerifyMessageCommand(message)) return;
@@ -1076,6 +1116,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
 
+
     // Use oldMember roles if available, otherwise fall back to our stored snapshot
     // (oldMember can be partial with empty roles cache)
     let oldRoleIds;
@@ -1086,6 +1127,21 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         oldRoleIds = [...storedRoles];
     } else {
         oldRoleIds = [];
+    }
+        // لوق إضافة/سحب الرتب
+    const roleLogChannel = newMember.guild.channels.cache.get(ROLE_LOG_CHANNEL_ID);
+    if (roleLogChannel && roleLogChannel.isTextBased()) {
+        const oldRoleSet = storedRoles ?? new Set();
+        const added = [...newMember.roles.cache.keys()].filter(id => id !== newMember.guild.id && !oldRoleSet.has(id));
+        const removed = [...(storedRoles ?? new Set())].filter(id => id !== newMember.guild.id && !newRoleIds.has(id));
+        for (const roleId of added) {
+            const role = newMember.guild.roles.cache.get(roleId);
+            await roleLogChannel.send(`تمت إضافة رتبة **${role?.name ?? roleId}** لـ <@${newMember.id}>`).catch(() => {});
+        }
+        for (const roleId of removed) {
+            const role = newMember.guild.roles.cache.get(roleId);
+            await roleLogChannel.send(`تمت إزالة رتبة **${role?.name ?? roleId}** من <@${newMember.id}>`).catch(() => {});
+        }
     }
 
     for (const roleId of oldRoleIds) {
@@ -1112,9 +1168,56 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         });
     }
 });
+client.on('guildBanAdd', async (ban) => {
+    const guild = ban.guild;
+
+    const executor = await getAuditExecutor(guild, AuditLogEvent.MemberBanAdd, ban.user.id);
+
+    if (executor && isIgnored(executor.id, executor.bot)) {
+        return;
+    }
+
+    // فك البان عن الشخص اللي تبند
+    await guild.members.unban(ban.user.id, 'Protection rollback: unauthorized ban').catch((err) => {
+        console.log(`[UNBAN ERR] ${err.message}`);
+    });
+
+    await sendLog(guild, `فكيت بان غير مصرح به عن <@${ban.user.id}>`);
+
+    // عقاب الشخص اللي سوى البان
+    await punish(guild, executor, 'بان عضو بدون صلاحية');
+});
 
 client.on('guildMemberAdd', async (member) => {
     saveMember(member);
+});
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    if (newState.channelId !== WAIT_ROOM_ID) return;
+    if (!newState.member) return;
+
+    const guild = newState.guild;
+
+    const meetChannel = guild.channels.cache.get(MEET_ROOM_ID);
+    if (!meetChannel || meetChannel.members.size > 0) return;
+
+    let canMove = false;
+    for (const channelId of ADMIN_VOICE_CHANNELS) {
+        const adminChannel = guild.channels.cache.get(channelId);
+        if (!adminChannel || adminChannel.members.size === 0) continue;
+        const members = [...adminChannel.members.values()];
+        const hasAdmin = members.some(m => m.permissions.has('Administrator') || m.permissions.has('ManageGuild'));
+        const hasNonAdmin = members.some(m => !m.permissions.has('Administrator') && !m.permissions.has('ManageGuild'));
+        if (hasAdmin && !hasNonAdmin) {
+            canMove = true;
+            break;
+        }
+    }
+
+    if (!canMove) return;
+
+    await newState.member.voice.setChannel(MEET_ROOM_ID, 'Auto-move from wait room').catch((err) => {
+        console.log(`[VOICE MOVE ERR] ${err.message}`);
+    });
 });
 
 client.on('guildCreate', async (guild) => {
