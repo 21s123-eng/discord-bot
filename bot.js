@@ -490,16 +490,7 @@ function messageHasImage(message) {
 
 async function handleAvatarSeparator(message) {
     if (!message.guild) return;
-    if (message.author.bot && message.author.id !== client.user?.id) return;
-
-    if (message.author.id === client.user?.id) {
-        const isSeparator = message.attachments.some((attachment) =>
-            (attachment.name ?? '').toLowerCase() === 'separator.png'
-        );
-
-        if (isSeparator) return;
-    }
-
+    if (message.author.bot) return;
     if (!AVATAR_SEPARATOR_CHANNEL_IDS.has(message.channel.id)) return;
     if (!messageHasImage(message)) return;
 
@@ -578,12 +569,23 @@ async function handleSendCommand(message) {
     }
 
     try {
-        await channel.send({
-            content: text || undefined,
-            files: attachments.map((attachment) => attachment.url),
-        });
+       await channel.send({
+    content: text || undefined,
+    files: attachments.map((attachment) => attachment.url),
+});
 
-        await message.reply('تم إرسال الرسالة.').catch(() => {});
+if (attachments.length > 0 && AVATAR_SEPARATOR_CHANNEL_IDS.has(channel.id)) {
+    await wait(700);
+
+    await channel.send({
+        files: [AVATAR_SEPARATOR_FILE],
+    }).catch(async (error) => {
+        console.log(`[SEPARATOR ERR] ${error.message}`);
+        await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
+    });
+}
+
+await message.reply('تم إرسال الرسالة.').catch(() => {});
     } catch (error) {
         await message.reply(`ما قدرت أرسلها: ${error.message}`).catch(() => {});
     }
