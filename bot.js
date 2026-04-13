@@ -537,22 +537,26 @@ async function handleSendCommand(message) {
     const args = message.content.slice('!send '.length).trim();
     const firstSpace = args.indexOf(' ');
 
-    const hasAttachments = message.attachments.size > 0;
+    const attachments = [...message.attachments.values()];
 
-    if (firstSpace === -1 && !hasAttachments) {
+    if (!args) {
         await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة` أو أرفق صورة').catch(() => {});
         return true;
     }
 
-    const channelId = (firstSpace === -1 ? args : args.slice(0, firstSpace)).replace('<#', '').replace('>', '').trim();
+    const channelId = (firstSpace === -1 ? args : args.slice(0, firstSpace))
+        .replace('<#', '')
+        .replace('>', '')
+        .trim();
+
     const text = firstSpace === -1 ? '' : args.slice(firstSpace + 1).trim();
 
     if (!channelId) {
-        await message.reply('اكتب كذا: `!send CHANNEL_ID الرسالة` أو أرفق صورة').catch(() => {});
+        await message.reply('اكتب آيدي الروم بعد الأمر.').catch(() => {});
         return true;
     }
 
-    if (!text && !hasAttachments) {
+    if (!text && attachments.length === 0) {
         await message.reply('اكتب رسالة أو أرفق صورة.').catch(() => {});
         return true;
     }
@@ -564,21 +568,16 @@ async function handleSendCommand(message) {
         return true;
     }
 
-    const sendPayload = {};
+    try {
+        await channel.send({
+            content: text || undefined,
+            files: attachments.map((attachment) => attachment.url),
+        });
 
-    if (text) {
-        sendPayload.content = text;
+        await message.reply('تم إرسال الرسالة.').catch(() => {});
+    } catch (error) {
+        await message.reply(`ما قدرت أرسلها: ${error.message}`).catch(() => {});
     }
-
-    if (hasAttachments) {
-        sendPayload.files = message.attachments.map((attachment) => ({
-            attachment: attachment.url,
-            name: attachment.name,
-        }));
-    }
-
-    await channel.send(sendPayload);
-    await message.reply('تم إرسال الرسالة.').catch(() => {});
 
     return true;
 }
