@@ -1,5 +1,5 @@
-import {1شasdd1
-    Client,d1s1s1
+import {s
+    Client,
     GatewayIntentBits,
     AuditLogEvent,
     ChannelType,
