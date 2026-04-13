@@ -1,4 +1,4 @@
-import {s
+import {
     Client,
     GatewayIntentBits,
     AuditLogEvent,
