@@ -1203,27 +1203,47 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!newState.member) return;
 
     const guild = newState.guild;
+    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
 
     const meetChannel = guild.channels.cache.get(MEET_ROOM_ID);
-    if (!meetChannel || meetChannel.members.size > 0) return;
+    if (!meetChannel) {
+        await logChannel?.send(`[VOICE] ما لقيت روم الردي`).catch(() => {});
+        return;
+    }
+
+    if (meetChannel.members.size > 0) {
+        await logChannel?.send(`[VOICE] روم الردي مو فاضي — فيه ${meetChannel.members.size} شخص`).catch(() => {});
+        return;
+    }
 
     let canMove = false;
+    let debugInfo = '';
+
     for (const channelId of ADMIN_VOICE_CHANNELS) {
         const adminChannel = guild.channels.cache.get(channelId);
         if (!adminChannel || adminChannel.members.size === 0) continue;
+
         const members = [...adminChannel.members.values()];
         const hasAdmin = members.some(m => m.permissions.has('Administrator') || m.permissions.has('ManageGuild'));
         const hasNonAdmin = members.some(m => !m.permissions.has('Administrator') && !m.permissions.has('ManageGuild'));
+
+        debugInfo += `\nروم ${channelId}: أعضاء=${members.length} فيه_اداري=${hasAdmin} فيه_عادي=${hasNonAdmin}`;
+
         if (hasAdmin && !hasNonAdmin) {
             canMove = true;
             break;
         }
     }
 
-    if (!canMove) return;
+    if (!canMove) {
+        await logChannel?.send(`[VOICE] ما قدرت أرفع — الشروط ما اكتملت:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
+        return;
+    }
 
-    await newState.member.voice.setChannel(MEET_ROOM_ID, 'Auto-move from wait room').catch((err) => {
-        console.log(`[VOICE MOVE ERR] ${err.message}`);
+    await logChannel?.send(`[VOICE] جاري رفع <@${newState.member.id}> للردي...`).catch(() => {});
+
+    await newState.member.voice.setChannel(MEET_ROOM_ID, 'Auto-move from wait room').catch(async (err) => {
+        await logChannel?.send(`[VOICE ERR] فشل الرفع: ${err.message}`).catch(() => {});
     });
 });
 
