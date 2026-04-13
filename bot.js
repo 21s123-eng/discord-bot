@@ -545,9 +545,8 @@ async function handleSendCommand(message) {
     }
 
     const channelId = (firstSpace === -1 ? args : args.slice(0, firstSpace))
-        .replace('<#', '')
-        .replace('>', '')
-        .trim();
+    .replace(/[<#>]/g, '')
+    .trim();
 
     const text = firstSpace === -1 ? '' : args.slice(firstSpace + 1).trim();
 
