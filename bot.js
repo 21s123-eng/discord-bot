@@ -574,7 +574,7 @@ async function handleSendCommand(message) {
     files: attachments.map((attachment) => attachment.url),
 });
 
-if (attachments.length > 0 && AVATAR_SEPARATOR_CHANNEL_IDS.has(channel.id)) {
+if (attachments.length > 0) {
     await wait(700);
 
     await channel.send({
