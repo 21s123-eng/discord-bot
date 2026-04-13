@@ -490,6 +490,16 @@ function messageHasImage(message) {
 
 async function handleAvatarSeparator(message) {
     if (!message.guild) return;
+    if (message.author.bot && message.author.id !== client.user?.id) return;
+
+    if (message.author.id === client.user?.id) {
+        const isSeparator = message.attachments.some((attachment) =>
+            (attachment.name ?? '').toLowerCase() === 'separator.png'
+        );
+
+        if (isSeparator) return;
+    }
+
     if (!AVATAR_SEPARATOR_CHANNEL_IDS.has(message.channel.id)) return;
     if (!messageHasImage(message)) return;
 
@@ -658,8 +668,6 @@ client.once('ready', async () => {
 });
 
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
     if (message.author.id === OWNER_ID) {
         if (await handleSendCommand(message)) return;
         if (await handleVerifyMessageCommand(message)) return;
