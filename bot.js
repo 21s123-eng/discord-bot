@@ -20,6 +20,9 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
+const WAIT_ROOM_ID = '1493287394466861317';
+const MEET_ROOM_ID = '1493287347788185742';
+
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
     '1492450059307192381',
@@ -49,10 +52,6 @@ function isAdminMember(member) {
     return member.roles.cache.some((role) => ADMIN_ROLE_IDS.has(role.id));
 }
 
-const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEAR_COMMAND_NAME = 'clear';
