@@ -20,8 +20,6 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
-const WAIT_ROOM_ID = '1493287394466861317';
-const MEET_ROOM_ID = '1493287347788185742';
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
     '1492450059307192381',
@@ -34,17 +32,22 @@ const ADMIN_VOICE_CHANNELS = new Set([
     '1492449365611249715',
     '1492449319184502794',
 ]);
-const ADMIN_VOICE_CHANNELS = new Set([
-    '1492450097462771833',
-    '1492450059307192381',
-    '1492450015703076884',
-    '1492449967535816744',
-    '1492449717186072606',
-    '1492449616761852095',
-    '1492449475912925214',
-    '1492449422230032535',
-    '1492449365611249715',
-    '1492449319184502794',
+
+const ADMIN_ROLE_IDS = new Set([
+    '1491821748801507409',
+    '1491831212573200506',
+    '1491831209834319952',
+    '1491831217627074582',
+    '1491831219963433080',
+    '1491831219393134745',
+    '1491822347181756597',
+    '1491823288249356409',
+    '1491811256896589905',
+]);
+
+function isAdminMember(member) {
+    return member.roles.cache.some((role) => ADMIN_ROLE_IDS.has(role.id));
+}
 ]);
 
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
@@ -1221,10 +1224,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     let debugInfo = '';
 
     for (const channelId of ADMIN_VOICE_CHANNELS) {
-        const adminChannel = guild.channels.cache.get(channelId);
+        const adminChannel = await guild.channels.fetch(channelId).catch(() => null);
 
-        if (!adminChannel) {
-            debugInfo += `\nروم ${channelId}: مو موجود بالكاش`;
+        if (!adminChannel || !adminChannel.isVoiceBased()) {
+            debugInfo += `\nروم ${channelId}: مو موجود أو مو صوتي`;
             continue;
         }
 
