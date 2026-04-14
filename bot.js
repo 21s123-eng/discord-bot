@@ -1199,24 +1199,13 @@ client.on('guildMemberAdd', async (member) => {
     saveMember(member);
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    if (newState.channelId !== WAIT_ROOM_ID) return;
+    if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
     if (!newState.member) return;
 
     const guild = newState.guild;
     const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
 
-    const meetChannel = guild.channels.cache.get(MEET_ROOM_ID);
-    if (!meetChannel) {
-        await logChannel?.send(`[VOICE] ما لقيت روم الردي`).catch(() => {});
-        return;
-    }
-
-    if (meetChannel.members.size > 0) {
-        await logChannel?.send(`[VOICE] روم الردي مو فاضي — فيه ${meetChannel.members.size} شخص`).catch(() => {});
-        return;
-    }
-
-    let canMove = false;
+    let targetChannel = null;
     let debugInfo = '';
 
     for (const channelId of ADMIN_VOICE_CHANNELS) {
@@ -1224,25 +1213,35 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         if (!adminChannel || adminChannel.members.size === 0) continue;
 
         const members = [...adminChannel.members.values()];
-        const hasAdmin = members.some(m => m.permissions.has('Administrator') || m.permissions.has('ManageGuild'));
-        const hasNonAdmin = members.some(m => !m.permissions.has('Administrator') && !m.permissions.has('ManageGuild'));
+
+        const hasAdmin = members.some((member) =>
+            member.permissions.has('Administrator') ||
+            member.permissions.has('ManageGuild')
+        );
+
+        const hasNonAdmin = members.some((member) =>
+            !member.permissions.has('Administrator') &&
+            !member.permissions.has('ManageGuild')
+        );
 
         debugInfo += `\nروم ${channelId}: أعضاء=${members.length} فيه_اداري=${hasAdmin} فيه_عادي=${hasNonAdmin}`;
 
         if (hasAdmin && !hasNonAdmin) {
-            canMove = true;
+            targetChannel = adminChannel;
             break;
         }
     }
 
-    if (!canMove) {
-        await logChannel?.send(`[VOICE] ما قدرت أرفع — الشروط ما اكتملت:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
+    if (!targetChannel) {
+        await logChannel?.send(`[VOICE] ما لقيت روم فيه إداري لحاله:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
         return;
     }
 
-    await logChannel?.send(`[VOICE] جاري رفع <@${newState.member.id}> للردي...`).catch(() => {});
+    if (newState.channelId === targetChannel.id) return;
 
-    await newState.member.voice.setChannel(MEET_ROOM_ID, 'Auto-move from wait room').catch(async (err) => {
+    await logChannel?.send(`[VOICE] جاري رفع <@${newState.member.id}> إلى روم الإداري ${targetChannel.id}...`).catch(() => {});
+
+    await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to available admin room').catch(async (err) => {
         await logChannel?.send(`[VOICE ERR] فشل الرفع: ${err.message}`).catch(() => {});
     });
 });
