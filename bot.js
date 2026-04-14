@@ -1,4 +1,4 @@
-import {س
+import {
     Client,
     GatewayIntentBits,
     AuditLogEvent,
@@ -58,13 +58,17 @@ const CLEAR_COMMAND_NAME = 'clear';
 const MAX_CLEAR_AMOUNT = 1000;
 
 const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
-    '1492517673584558140',
-    '1492517632186781767',
-    '1492517584158068757',
-    '1492517526012170300',
-    '1492517479170179203',
-    '1492517424325726300',
-    '1492516778071556368',
+    '1493532561895587890',
+    '1493532613971935304',
+    '1493532681517010995',
+    '1493532722277126154',
+    '1493532881425928263',
+    '1493532915462701056',
+    '1493532962963193977',
+    '1493533171046809610',
+    '1493533396561952818',
+    '1493533680566796438',
+    '1493533721637158922',
 ]);
 
 console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
@@ -153,14 +157,28 @@ function punishOnCooldown(guildId, userId, reason) {
     return false;
 }
 
+function getTimestamp() {
+    const now = new Date();
+    return now.toLocaleString('ar-SA', {
+        timeZone: 'Asia/Riyadh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+}
 async function sendLog(guild, text) {
-    console.log(`[LOG] ${text}`);
+    const ts = getTimestamp();
+console.log(`[LOG] [${ts}] ${text}`);
 
     try {
         const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
 
         if (channel && channel.isTextBased()) {
-            await channel.send(`[LOG] ${text}`).catch(() => {});
+           await channel.send(`[LOG] [${ts}] ${text}`).catch(() => {});
         }
     } catch (error) {
         console.log(`[LOG ERR] ${error.message}`);
