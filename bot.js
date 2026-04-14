@@ -1218,9 +1218,16 @@ client.on('guildMemberAdd', async (member) => {
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
     if (!newState.member) return;
+    if (newState.member.user.bot) return;
 
     const guild = newState.guild;
     const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
+    const botMember = guild.members.me;
+
+    if (!botMember) {
+        await logChannel?.send('[VOICE ERR] ما قدرت ألقى عضوية البوت في السيرفر').catch(() => {});
+        return;
+    }
 
     let targetChannel = null;
     let debugInfo = '';
@@ -1233,32 +1240,42 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             continue;
         }
 
-        const members = [...adminChannel.members.values()];
-        const adminCount = members.filter((member) => isAdminMember(member)).length;
-        const citizenCount = members.filter((member) => !isAdminMember(member)).length;
+        const members = [...adminChannel.members.values()].filter((member) => !member.user.bot);
 
-        debugInfo += `\nروم ${channelId}: إدارة=${adminCount} مواطن=${citizenCount}`;
+        const admins = members.filter((member) => isAdminMember(member));
+        const citizens = members.filter((member) => !isAdminMember(member));
 
-        if (adminCount > 0 && citizenCount === 0) {
+        const botPerms = adminChannel.permissionsFor(botMember);
+        const canView = botPerms?.has('ViewChannel');
+        const canConnect = botPerms?.has('Connect');
+        const canMove = botMember.permissions.has('MoveMembers');
+
+        debugInfo += `\nروم ${channelId}: إدارة=${admins.length} مواطن=${citizens.length} view=${canView} connect=${canConnect} move=${canMove}`;
+
+        if (admins.length > 0 && citizens.length === 0) {
+            if (!canView || !canConnect || !canMove) {
+                debugInfo += ` — مناسب لكن صلاحيات البوت ناقصة`;
+                continue;
+            }
+
             targetChannel = adminChannel;
             break;
         }
     }
 
     if (!targetChannel) {
-        await logChannel?.send(`[VOICE] ما لقيت روم فيه إدارة بدون مواطن:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
+        await logChannel?.send(`[VOICE] ما لقيت روم مناسب فيه إدارة بدون مواطن:${debugInfo}`).catch(() => {});
         return;
     }
 
     if (newState.channelId === targetChannel.id) return;
 
-    await logChannel?.send(`[VOICE] لقيت روم إدارة بدون مواطن ${targetChannel.id} — جاري رفع <@${newState.member.id}>`).catch(() => {});
+    await logChannel?.send(`[VOICE] بحاول أرفع <@${newState.member.id}> إلى <#${targetChannel.id}>`).catch(() => {});
 
     await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to admin room without citizens').catch(async (err) => {
-        await logChannel?.send(`[VOICE ERR] فشل الرفع إلى ${targetChannel.id}: ${err.message}`).catch(() => {});
+        await logChannel?.send(`[VOICE ERR] فشل الرفع إلى <#${targetChannel.id}>: ${err.message}`).catch(() => {});
     });
 });
-
 client.on('guildCreate', async (guild) => {
     await registerClearCommand(guild);
     await snapshotGuild(guild).catch(() => {});
