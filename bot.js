@@ -48,8 +48,11 @@ const ADMIN_ROLE_IDS = new Set([
 function isAdminMember(member) {
     return member.roles.cache.some((role) => ADMIN_ROLE_IDS.has(role.id));
 }
-]);
 
+const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEAR_COMMAND_NAME = 'clear';
