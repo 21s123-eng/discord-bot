@@ -34,6 +34,18 @@ const ADMIN_VOICE_CHANNELS = new Set([
     '1492449365611249715',
     '1492449319184502794',
 ]);
+const ADMIN_VOICE_CHANNELS = new Set([
+    '1492450097462771833',
+    '1492450059307192381',
+    '1492450015703076884',
+    '1492449967535816744',
+    '1492449717186072606',
+    '1492449616761852095',
+    '1492449475912925214',
+    '1492449422230032535',
+    '1492449365611249715',
+    '1492449319184502794',
+]);
 
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1210,39 +1222,35 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
     for (const channelId of ADMIN_VOICE_CHANNELS) {
         const adminChannel = guild.channels.cache.get(channelId);
-        if (!adminChannel || adminChannel.members.size === 0) continue;
+
+        if (!adminChannel) {
+            debugInfo += `\nروم ${channelId}: مو موجود بالكاش`;
+            continue;
+        }
 
         const members = [...adminChannel.members.values()];
+        const adminCount = members.filter((member) => isAdminMember(member)).length;
+        const citizenCount = members.filter((member) => !isAdminMember(member)).length;
 
-        const hasAdmin = members.some((member) =>
-            member.permissions.has('Administrator') ||
-            member.permissions.has('ManageGuild')
-        );
+        debugInfo += `\nروم ${channelId}: إدارة=${adminCount} مواطن=${citizenCount}`;
 
-        const hasNonAdmin = members.some((member) =>
-            !member.permissions.has('Administrator') &&
-            !member.permissions.has('ManageGuild')
-        );
-
-        debugInfo += `\nروم ${channelId}: أعضاء=${members.length} فيه_اداري=${hasAdmin} فيه_عادي=${hasNonAdmin}`;
-
-        if (hasAdmin && !hasNonAdmin) {
+        if (adminCount > 0 && citizenCount === 0) {
             targetChannel = adminChannel;
             break;
         }
     }
 
     if (!targetChannel) {
-        await logChannel?.send(`[VOICE] ما لقيت روم فيه إداري لحاله:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
+        await logChannel?.send(`[VOICE] ما لقيت روم فيه إدارة بدون مواطن:${debugInfo || ' ما فيه أحد في رومات الإدارة'}`).catch(() => {});
         return;
     }
 
     if (newState.channelId === targetChannel.id) return;
 
-    await logChannel?.send(`[VOICE] جاري رفع <@${newState.member.id}> إلى روم الإداري ${targetChannel.id}...`).catch(() => {});
+    await logChannel?.send(`[VOICE] لقيت روم إدارة بدون مواطن ${targetChannel.id} — جاري رفع <@${newState.member.id}>`).catch(() => {});
 
-    await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to available admin room').catch(async (err) => {
-        await logChannel?.send(`[VOICE ERR] فشل الرفع: ${err.message}`).catch(() => {});
+    await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to admin room without citizens').catch(async (err) => {
+        await logChannel?.send(`[VOICE ERR] فشل الرفع إلى ${targetChannel.id}: ${err.message}`).catch(() => {});
     });
 });
 
