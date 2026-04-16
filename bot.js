@@ -189,7 +189,7 @@ async function sendLog(guild, text) {
 console.log(`[LOG] [${ts}] ${text}`);
 
     try {
-        const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
+        const channel = guild.channels.cache.get(SERVER_LOG_CHANNEL_ID);
 
         if (channel && channel.isTextBased()) {
            await channel.send(`[LOG] [${ts}] ${text}`).catch(() => {});
@@ -778,7 +778,7 @@ client.on('messageCreate', async (message) => {
                 });
                        }
 
-            const timeoutReason = hasRealText
+                      const timeoutReason = hasRealText
                 ? 'ارسال كتابه في روم كليب'
                 : message.attachments.some((a) =>
                     a.contentType?.startsWith('image/') ||
@@ -813,7 +813,7 @@ client.on('messageCreate', async (message) => {
             if (member) {
                 await member.timeout(ONE_WEEK_MS, 'إرسال رابط').catch(() => {});
             }
-                        const linkNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+                                    const linkNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
             if (linkNotifChannel && linkNotifChannel.isTextBased()) {
                 await linkNotifChannel.send(
                     `@here\n\nperson : <@${message.author.id}>\n\nthe reason : ارسال رابط\n\nID : ${message.author.id}`
@@ -1229,6 +1229,40 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
+        const wasTimedOut = oldMember.communicationDisabledUntil && oldMember.communicationDisabledUntil > new Date();
+    const isNowTimedOut = newMember.communicationDisabledUntil && newMember.communicationDisabledUntil > new Date();
+
+    if (!wasTimedOut && isNowTimedOut) {
+        try {
+            const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
+            const entry = [...auditLogs.entries.values()].find((e) =>
+                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
+            );
+
+            const executor = entry?.executor ?? null;
+            const auditReason = entry?.reason ?? 'غير معروف السبب';
+
+            const msLeft = newMember.communicationDisabledUntil - new Date();
+            const totalMinutes = Math.round(msLeft / 60000);
+            const days = Math.floor(totalMinutes / 1440);
+            const hours = Math.floor((totalMinutes % 1440) / 60);
+            const mins = totalMinutes % 60;
+            const durationText = days > 0 ? `${days} يوم` : hours > 0 ? `${hours} ساعة` : `${mins} دقيقة`;
+
+            const givenBy = executor
+                ? (executor.id === client.user?.id ? 'البوت' : `<@${executor.id}>`)
+                : 'غير معروف';
+
+            const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (timeoutCh && timeoutCh.isTextBased()) {
+                await timeoutCh.send(
+                    `@here\n\nperson : <@${newMember.id}>\n\nthe reason : ${auditReason}\n\nID : ${newMember.id}\n\nأعطاه التايم اوت : ${givenBy}\n\nالمدة : ${durationText}`
+                ).catch(() => {});
+            }
+        } catch (err) {
+            console.log(`[TIMEOUT DETECT ERR] ${err.message}`);
+        }
+    }
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
 
 
