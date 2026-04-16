@@ -25,6 +25,7 @@ const MEDIA_ONLY_TIMEOUT_MS = 5 * 60 * 1000;
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
 const WAIT_ROOM_ID = '1493287394466861317';
 const MEET_ROOM_ID = '1493287347788185742';
+const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
 
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
@@ -775,6 +776,22 @@ client.on('messageCreate', async (message) => {
                 await member.timeout(MEDIA_ONLY_TIMEOUT_MS, 'روم مخصص للفيديو فقط').catch((err) => {
                     console.log(`[VIDEO ONLY TIMEOUT ERR] ${err.message}`);
                 });
+                       }
+
+            const timeoutReason = hasRealText
+                ? 'ارسال كتابه في روم كليب'
+                : message.attachments.some((a) =>
+                    a.contentType?.startsWith('image/') ||
+                    /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name ?? a.url)
+                  )
+                ? 'ارسال صوره في روم كليب'
+                : 'ارسال منشن في روم كليب';
+
+            const timeoutNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (timeoutNotifChannel && timeoutNotifChannel.isTextBased()) {
+                await timeoutNotifChannel.send(
+                    `@here\n\nperson : <@${message.author.id}>\n\nthe reason : ${timeoutReason}\n\nID : ${message.author.id}`
+                ).catch(() => {});
             }
 
             return;
@@ -796,10 +813,10 @@ client.on('messageCreate', async (message) => {
             if (member) {
                 await member.timeout(ONE_WEEK_MS, 'إرسال رابط').catch(() => {});
             }
-            const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
-            if (logChannel && logChannel.isTextBased()) {
-                await logChannel.send(
-                    `تم إعطاء تايم اوت أسبوع لـ <@${message.author.id}>\nالسبب: إرسال رابط`
+                        const linkNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (linkNotifChannel && linkNotifChannel.isTextBased()) {
+                await linkNotifChannel.send(
+                    `@here\n\nperson : <@${message.author.id}>\n\nthe reason : ارسال رابط\n\nID : ${message.author.id}`
                 ).catch(() => {});
             }
         } catch (err) {
