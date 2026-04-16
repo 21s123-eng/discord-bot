@@ -187,18 +187,20 @@ function getTimestamp() {
 }
 async function sendLog(guild, text) {
     const ts = getTimestamp();
-console.log(`[LOG] [${ts}] ${text}`);
+    console.log(`[LOG] [${ts}] ${text}`);
 
     try {
-                const channel = guild.channels.cache.get(SERVER_LOG_CHANNEL_ID)
-            ?? await guild.channels.fetch(SERVER_LOG_CHANNEL_ID).catch(() => null);
-        console.log(`[SEND LOG CH] found:${!!channel}`);
+        let channel = guild.channels.cache.get(SERVER_LOG_CHANNEL_ID);
+        if (!channel) channel = await guild.channels.fetch(SERVER_LOG_CHANNEL_ID).catch((e) => { console.log(`[SERVER LOG FETCH ERR] ${e.message}`); return null; });
 
-        if (channel && channel.isTextBased()) {
-           await channel.send(`[LOG] [${ts}] ${text}`).catch(() => {});
-        }
+        if (!channel) { console.log(`[SERVER LOG] channel not found: ${SERVER_LOG_CHANNEL_ID}`); return; }
+        if (!channel.isTextBased()) { console.log(`[SERVER LOG] channel is not text-based`); return; }
+
+        await channel.send(`[LOG] [${ts}] ${text}`).catch((e) => console.log(`[SERVER LOG SEND ERR] ${e.message}`));
     } catch (error) {
         console.log(`[LOG ERR] ${error.message}`);
+    }
+}
     }
 }
 
@@ -1235,14 +1237,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         const wasTimedOut = oldMember.communicationDisabledUntil && oldMember.communicationDisabledUntil > new Date();
     const isNowTimedOut = newMember.communicationDisabledUntil && newMember.communicationDisabledUntil > new Date();
 
-      console.log(`[TIMEOUT CHECK] ${newMember.id} — was:${!!wasTimedOut} now:${!!isNowTimedOut} until:${newMember.communicationDisabledUntil}`);
-
-    if (!wasTimedOut && isNowTimedOut) {
+         if (!wasTimedOut && isNowTimedOut) {
         try {
-            console.log(`[TIMEOUT TRIGGERED] ${newMember.id}`);
+            await wait(1000);
             const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const entry = [...auditLogs.entries.values()].find((e) =>
-                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
+                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 20000
             );
 
             const executor = entry?.executor ?? null;
@@ -1259,36 +1259,34 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 ? (executor.id === client.user?.id ? 'البوت' : `<@${executor.id}>`)
                 : 'غير معروف';
 
-                       const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID) 
-                ?? await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch(() => null);
-            console.log(`[TIMEOUT CH] found:${!!timeoutCh} id:${TIMEOUT_LOG_CHANNEL_ID}`);
-            if (timeoutCh && timeoutCh.isTextBased()) {
-                await timeoutCh.send(
-                    `@here\n\nperson : <@${newMember.id}>\n\nthe reason : ${auditReason}\n\nID : ${newMember.id}\n\nأعطاه التايم اوت : ${givenBy}\n\nالمدة : ${durationText}`
-                ).catch(() => {});
-            }
+            let timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (!timeoutCh) timeoutCh = await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch((e) => { console.log(`[TIMEOUT CH FETCH ERR] ${e.message}`); return null; });
+
+            if (!timeoutCh) { console.log(`[TIMEOUT] channel not found: ${TIMEOUT_LOG_CHANNEL_ID}`); }
+            else await timeoutCh.send(`@here\n\nperson : <@${newMember.id}>\n\nthe reason : ${auditReason}\n\nID : ${newMember.id}\n\nأعطاه التايم اوت : ${givenBy}\n\nالمدة : ${durationText}`).catch((e) => console.log(`[TIMEOUT SEND ERR] ${e.message}`));
         } catch (err) {
             console.log(`[TIMEOUT DETECT ERR] ${err.message}`);
-               }
+        }
     } else if (wasTimedOut && !isNowTimedOut) {
         try {
+            await wait(1000);
             const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const entry = [...auditLogs.entries.values()].find((e) =>
-                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
+                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 20000
             );
             const remover = entry?.executor ?? null;
             const removedBy = remover
                 ? (remover.id === client.user?.id ? 'البوت' : `<@${remover.id}>`)
                 : 'غير معروف';
 
-                        const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID)
-                ?? await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch(() => null);
-            if (timeoutCh && timeoutCh.isTextBased()) {
-                await timeoutCh.send(
-                    `person : <@${newMember.id}>\n\nتم فك التايم اوت بواسطة : ${removedBy}\n\nID : ${newMember.id}`
-                ).catch(() => {});
-            }
+            let timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (!timeoutCh) timeoutCh = await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch((e) => { console.log(`[TIMEOUT CH FETCH ERR] ${e.message}`); return null; });
+
+            if (timeoutCh) await timeoutCh.send(`person : <@${newMember.id}>\n\nتم فك التايم اوت بواسطة : ${removedBy}\n\nID : ${newMember.id}`).catch((e) => console.log(`[TIMEOUT REMOVE SEND ERR] ${e.message}`));
         } catch (err) {
+            console.log(`[TIMEOUT REMOVE ERR] ${err.message}`);
+        }
+    }
             console.log(`[TIMEOUT REMOVE ERR] ${err.message}`);
         }
     }
