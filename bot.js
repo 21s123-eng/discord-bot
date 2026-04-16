@@ -190,7 +190,9 @@ async function sendLog(guild, text) {
 console.log(`[LOG] [${ts}] ${text}`);
 
     try {
-        const channel = guild.channels.cache.get(SERVER_LOG_CHANNEL_ID);
+                const channel = guild.channels.cache.get(SERVER_LOG_CHANNEL_ID)
+            ?? await guild.channels.fetch(SERVER_LOG_CHANNEL_ID).catch(() => null);
+        console.log(`[SEND LOG CH] found:${!!channel}`);
 
         if (channel && channel.isTextBased()) {
            await channel.send(`[LOG] [${ts}] ${text}`).catch(() => {});
@@ -1279,7 +1281,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 ? (remover.id === client.user?.id ? 'البوت' : `<@${remover.id}>`)
                 : 'غير معروف';
 
-            const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+                        const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID)
+                ?? await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch(() => null);
             if (timeoutCh && timeoutCh.isTextBased()) {
                 await timeoutCh.send(
                     `person : <@${newMember.id}>\n\nتم فك التايم اوت بواسطة : ${removedBy}\n\nID : ${newMember.id}`
