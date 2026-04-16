@@ -1,4 +1,4 @@
-import {س
+import {
     Client,
     GatewayIntentBits,
     AuditLogEvent,
@@ -21,6 +21,7 @@ const AVATAR_SEPARATOR_FILE = './separator.png';
 
 const VIDEO_REACTION_CHANNEL_ID = '1490108870524276876';
 const VIDEO_REACTIONS = ['🔥', '🤣'];
+const MEDIA_ONLY_TIMEOUT_MS = 5 * 60 * 1000;
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
 const WAIT_ROOM_ID = '1493287394466861317';
 const MEET_ROOM_ID = '1493287347788185742';
@@ -738,19 +739,54 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
-    if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
+       if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
         const hasVideo = message.attachments.some((attachment) =>
             attachment.contentType?.startsWith('video/') ||
             /\.(mp4|mov|webm|mkv|avi)$/i.test(attachment.name ?? attachment.url)
         );
 
-        if (hasVideo) {
-            for (const emoji of VIDEO_REACTIONS) {
-                await message.react(emoji).catch((err) => {
-                    console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
+        if (message.author.id === OWNER_ID) {
+            if (hasVideo) {
+                for (const emoji of VIDEO_REACTIONS) {
+                    await message.react(emoji).catch((err) => {
+                        console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
+                    });
+                }
+            }
+
+            return;
+        }
+
+        const textWithoutMentions = message.content
+            .replace(/<@!?\d+>/g, '')
+            .replace(/<@&\d+>/g, '')
+            .replace(/<#\d+>/g, '')
+            .replace(/@everyone|@here/g, '')
+            .trim();
+
+        const hasRealText = textWithoutMentions.length > 0;
+
+        if (!hasVideo || hasRealText) {
+            await message.delete().catch(() => {});
+
+            const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+
+            if (member) {
+                await member.timeout(MEDIA_ONLY_TIMEOUT_MS, 'روم مخصص للفيديو فقط').catch((err) => {
+                    console.log(`[VIDEO ONLY TIMEOUT ERR] ${err.message}`);
                 });
             }
+
+            return;
         }
+
+        for (const emoji of VIDEO_REACTIONS) {
+            await message.react(emoji).catch((err) => {
+                console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
+            });
+        }
+
+        return;
     }
     
     if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID) {
