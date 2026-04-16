@@ -10,7 +10,7 @@ import {
 const TOKEN = process.env.TOKEN;
 
 const OWNER_ID = '1125609597613375629';
-const LOG_CHANNEL_ID = '1494342769714663524';
+const LOG_CHANNEL_ID = '1492108809618063432';
 
 const VERIFY_CHANNEL_ID = '1492435148439027722';
 const VERIFY_EMOJI = '✅';
@@ -1233,8 +1233,12 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         const wasTimedOut = oldMember.communicationDisabledUntil && oldMember.communicationDisabledUntil > new Date();
     const isNowTimedOut = newMember.communicationDisabledUntil && newMember.communicationDisabledUntil > new Date();
 
+      console.log(`[TIMEOUT CHECK] ${newMember.id} — was:${!!wasTimedOut} now:${!!isNowTimedOut} until:${newMember.communicationDisabledUntil}`);
+
     if (!wasTimedOut && isNowTimedOut) {
         try {
+            console.log(`[TIMEOUT TRIGGERED] ${newMember.id}`);
+            const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const entry = [...auditLogs.entries.values()].find((e) =>
                 e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
@@ -1254,7 +1258,9 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
                 ? (executor.id === client.user?.id ? 'البوت' : `<@${executor.id}>`)
                 : 'غير معروف';
 
-            const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+                       const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID) 
+                ?? await newMember.guild.channels.fetch(TIMEOUT_LOG_CHANNEL_ID).catch(() => null);
+            console.log(`[TIMEOUT CH] found:${!!timeoutCh} id:${TIMEOUT_LOG_CHANNEL_ID}`);
             if (timeoutCh && timeoutCh.isTextBased()) {
                 await timeoutCh.send(
                     `@here\n\nperson : <@${newMember.id}>\n\nthe reason : ${auditReason}\n\nID : ${newMember.id}\n\nأعطاه التايم اوت : ${givenBy}\n\nالمدة : ${durationText}`
