@@ -1285,9 +1285,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             console.log(`[TIMEOUT REMOVE ERR] ${err.message}`);
         }
     }
-            console.log(`[TIMEOUT REMOVE ERR] ${err.message}`);
-        }
-    }
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
 
 
