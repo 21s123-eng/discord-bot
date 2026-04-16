@@ -1239,7 +1239,6 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         try {
             console.log(`[TIMEOUT TRIGGERED] ${newMember.id}`);
             const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
-            const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const entry = [...auditLogs.entries.values()].find((e) =>
                 e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
             );
