@@ -1262,9 +1262,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             }
         } catch (err) {
             console.log(`[TIMEOUT DETECT ERR] ${err.message}`);
-        }
-    }
-        } else if (wasTimedOut && !isNowTimedOut) {
+               }
+    } else if (wasTimedOut && !isNowTimedOut) {
         try {
             const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
             const entry = [...auditLogs.entries.values()].find((e) =>
