@@ -1,4 +1,4 @@
-import {س
+import {
     Client,
     GatewayIntentBits,
     AuditLogEvent,
@@ -19,6 +19,8 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
+const VIDEO_REACTION_CHANNEL_ID = '1490108870524276876';
+const VIDEO_REACTIONS = ['🔥', '🤣'];
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
 const WAIT_ROOM_ID = '1493287394466861317';
 const MEET_ROOM_ID = '1493287347788185742';
@@ -78,6 +80,7 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1490109019669663886',
     '1490109021506765060',
     '1493533721637158922',
+    '1490108870524276876',
 ]);
 
 console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
@@ -735,7 +738,21 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
+    if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
+        const hasVideo = message.attachments.some((attachment) =>
+            attachment.contentType?.startsWith('video/') ||
+            /\.(mp4|mov|webm|mkv|avi)$/i.test(attachment.name ?? attachment.url)
+        );
 
+        if (hasVideo) {
+            for (const emoji of VIDEO_REACTIONS) {
+                await message.react(emoji).catch((err) => {
+                    console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
+                });
+            }
+        }
+    }
+    
     if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID) {
         try {
             await message.delete().catch(() => {});
