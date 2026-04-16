@@ -201,8 +201,6 @@ async function sendLog(guild, text) {
         console.log(`[LOG ERR] ${error.message}`);
     }
 }
-    }
-}
 
 function saveRole(role) {
     if (!role || !role.guild || role.managed) return;
