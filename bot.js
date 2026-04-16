@@ -26,6 +26,7 @@ const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
 const WAIT_ROOM_ID = '1493287394466861317';
 const MEET_ROOM_ID = '1493287347788185742';
 const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
+const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
 
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
@@ -1261,6 +1262,27 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
             }
         } catch (err) {
             console.log(`[TIMEOUT DETECT ERR] ${err.message}`);
+        }
+    }
+        } else if (wasTimedOut && !isNowTimedOut) {
+        try {
+            const auditLogs = await newMember.guild.fetchAuditLogs({ type: AuditLogEvent.MemberUpdate, limit: 5 });
+            const entry = [...auditLogs.entries.values()].find((e) =>
+                e.target?.id === newMember.id && e.createdTimestamp >= Date.now() - 15000
+            );
+            const remover = entry?.executor ?? null;
+            const removedBy = remover
+                ? (remover.id === client.user?.id ? 'البوت' : `<@${remover.id}>`)
+                : 'غير معروف';
+
+            const timeoutCh = newMember.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+            if (timeoutCh && timeoutCh.isTextBased()) {
+                await timeoutCh.send(
+                    `person : <@${newMember.id}>\n\nتم فك التايم اوت بواسطة : ${removedBy}\n\nID : ${newMember.id}`
+                ).catch(() => {});
+            }
+        } catch (err) {
+            console.log(`[TIMEOUT REMOVE ERR] ${err.message}`);
         }
     }
     const newRoleIds = new Set([...newMember.roles.cache.keys()]);
