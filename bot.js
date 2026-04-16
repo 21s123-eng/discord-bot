@@ -1,4 +1,4 @@
-import {s
+import {
     Client,
     GatewayIntentBits,
     AuditLogEvent,
@@ -77,6 +77,7 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1490109014032253179',
     '1490109019669663886',
     '1490109021506765060',
+    '1493533721637158922',
 ]);
 
 console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
