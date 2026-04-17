@@ -66,6 +66,24 @@ const ADMIN_ROLE_IDS = new Set([
     '1491823288249356409',
     '1491811256896589905',
 ]);
+const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1490156350896996413',
+    '1491811256896589905',
+    '1491823288249356409',
+    '1491822347181756597',
+    '1491831219393134745',
+    '1491831219963433080',
+    '1491831217627074582',
+    '1491831209834319952',
+    '1491831212573200506',
+    '1491821748801507409',
+]);
+
+const TIK_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1492989594445283489',
+    '1494831143697252372',
+    '1490156350896996413',
+]);
 
 function isAdminMember(member) {
     return member.roles.cache.some((role) => ADMIN_ROLE_IDS.has(role.id));
@@ -1053,22 +1071,37 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // زر Claim
-        if (id === 'ticket_claim') {
+               if (id === 'ticket_claim') {
             const ticketData = activeTickets.get(interaction.channelId);
+
             if (!ticketData) {
                 await interaction.reply({ content: 'هذه ليست تذكرة نشطة.', ephemeral: true });
                 return;
             }
+
+            const allowedRoles = ticketData.categoryId === TICKET_CATEGORY_TIK_ID
+                ? TIK_TICKET_CLAIM_ROLE_IDS
+                : GENERAL_TICKET_CLAIM_ROLE_IDS;
+
+            const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+            const canClaim = member?.roles.cache.some((role) => allowedRoles.has(role.id));
+
+            if (!canClaim) {
+                await interaction.reply({ content: 'ما عندك صلاحية تستلم هذه التذكرة.', ephemeral: true });
+                return;
+            }
+
             if (ticketData.claimed) {
                 await interaction.reply({ content: `التذكرة محجوزة بالفعل بواسطة <@${ticketData.claimedBy}>.`, ephemeral: true });
                 return;
             }
 
-            ticketData.claimed   = true;
+            ticketData.claimed = true;
             ticketData.claimedBy = interaction.user.id;
 
             const claimLog = interaction.guild.channels.cache.get(TICKET_CLAIM_LOG_CHANNEL_ID)
                 ?? await interaction.guild.channels.fetch(TICKET_CLAIM_LOG_CHANNEL_ID).catch(() => null);
+
             if (claimLog) {
                 await claimLog.send(
                     `<@${interaction.user.id}> استلم التذكرة <#${interaction.channelId}>`
