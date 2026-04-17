@@ -6,6 +6,11 @@ import {
     Partials,
     ApplicationCommandOptionType,
     EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    StringSelectMenuBuilder,
+    PermissionFlagsBits,
 } from 'discord.js';
 
 const TOKEN = process.env.TOKEN;
@@ -30,6 +35,12 @@ const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
 const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
 const MESSAGE_LOG_CHANNEL_ID = '1494807380024754367';
 const messageCache = new Map();
+const TICKET_CATEGORY_GENERAL_ID = '1490131505387933807';
+const TICKET_CATEGORY_TIK_ID     = '1494815199784603738';
+const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
+
+const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
+const ticketCounters = new Map(); // guildId → number
 
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
@@ -726,7 +737,47 @@ async function clearMessages(interaction, amount) {
 
     return deletedTotal;
 }
+async function sendTicketPanel(channel, type) {
+    if (type === 'general') {
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('𝟎𝟖')
+            .setDescription(
+                '**افتح تذكرة**\n\n' +
+                '**قوانين التذاكر:**\n' +
+                '- الاحترام واجب وعدم التهجم في التكت.\n' +
+                '- في حال فتح تكت غير مرتبط بالموضوع.\n' +
+                '- يمنع الكذب والشتم والإهانة.\n' +
+                '- لن يحل تكتك بعد مرور 24 ساعة من الشكوى.\n' +
+                '- حسب الإساءة في الإهانة إلى المستخدم/الإداري داخل التكت.'
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket_general').setLabel('افتح تذكرة').setStyle(ButtonStyle.Primary)
+        );
+        await channel.send({ embeds: [embed], components: [row] });
+    } else {
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('𝟎𝟖')
+            .setDescription(
+                '**افتح تذكرة تقديم**\n\n' +
+                '**قوانين التذاكر:**\n' +
+                '- الاحترام واجب وعدم التهجم في التكت.\n' +
+                '- في حال فتح تكت غير مرتبط بالموضوع.\n' +
+                '- يمنع الكذب والشتم والإهانة.\n' +
+                '- لن يحل تكتك بعد مرور 24 ساعة من الشكوى.\n' +
+                '- حسب الإساءة في الإهانة إلى المستخدم/الإداري داخل التكت.'
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket_tik').setLabel('افتح تذكرة').setStyle(ButtonStyle.Primary)
+        );
+        await channel.send({ embeds: [embed], components: [row] });
+    }
+}
 client.once('ready', async () => {
     console.log(`[Bot] Online as ${client.user.tag}`);
 
@@ -819,6 +870,16 @@ client.on('messageCreate', async (message) => {
                 : 'ارسال منشن في روم كليب';
 
             const timeoutNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
+                    if (message.content === '!setup-ticket') {
+            await sendTicketPanel(message.channel, 'general');
+            await message.delete().catch(() => {});
+            return;
+        }
+        if (message.content === '!setup-ticket-tik') {
+            await sendTicketPanel(message.channel, 'tik');
+            await message.delete().catch(() => {});
+            return;
+        }
             if (timeoutNotifChannel && timeoutNotifChannel.isTextBased()) {
                 await timeoutNotifChannel.send(
                     `@here\n\nperson : <@${message.author.id}>\n\nthe reason : ${timeoutReason}\n\nID : ${message.author.id}`
@@ -911,6 +972,199 @@ client.on('interactionCreate', async (interaction) => {
             content: `صار خطأ أثناء الحذف: ${error.message}`,
             ephemeral: true,
         }).catch(() => {});
+    }
+});
+client.on('interactionCreate', async (interaction) => {
+    // ───────────── أزرار ─────────────
+    if (interaction.isButton()) {
+        const id = interaction.customId;
+
+        // زر فتح تذكرة عامة
+        if (id === 'open_ticket_general') {
+            const select = new StringSelectMenuBuilder()
+                .setCustomId('ticket_select_general')
+                .setPlaceholder('اختر نوع التذكرة')
+                .addOptions([
+                    { label: 'تقديم اداره',  value: 'تقديم_اداره' },
+                    { label: 'مشكله',        value: 'مشكله' },
+                    { label: 'استفسار',      value: 'استفسار' },
+                ]);
+            const row = new ActionRowBuilder().addComponents(select);
+            await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
+            return;
+        }
+
+        // زر فتح تذكرة تقديم
+        if (id === 'open_ticket_tik') {
+            const select = new StringSelectMenuBuilder()
+                .setCustomId('ticket_select_tik')
+                .setPlaceholder('اختر نوع التقديم')
+                .addOptions([
+                    { label: 'تقديم على 𝘛𝘪𝘬', value: 'tik' },
+                    { label: 'تقديم على 𝘚𝘵𝘳𝘦', value: 'stre' },
+                ]);
+            const row = new ActionRowBuilder().addComponents(select);
+            await interaction.reply({ content: 'اختر نوع التقديم:', components: [row], ephemeral: true });
+            return;
+        }
+
+        // زر Close
+        if (id === 'close_ticket') {
+            const ticketData = activeTickets.get(interaction.channelId);
+            if (ticketData) {
+                await interaction.channel.permissionOverwrites.edit(ticketData.creatorId, {
+                    SendMessages: false,
+                }).catch(() => {});
+            }
+
+            const openBtn   = new ButtonBuilder().setCustomId('ticket_reopen').setLabel('Open').setStyle(ButtonStyle.Success);
+            const deleteBtn = new ButtonBuilder().setCustomId('ticket_delete').setLabel('Delete').setStyle(ButtonStyle.Danger);
+            const row = new ActionRowBuilder().addComponents(openBtn, deleteBtn);
+
+            await interaction.reply({ content: '🔒 تم إغلاق التذكرة. اختر إجراء:', components: [row], ephemeral: true });
+            await interaction.channel.send('🔒 **تم إغلاق التذكرة.**').catch(() => {});
+            return;
+        }
+
+        // زر Open (إعادة فتح)
+        if (id === 'ticket_reopen') {
+            const ticketData = activeTickets.get(interaction.channelId);
+            if (ticketData) {
+                await interaction.channel.permissionOverwrites.edit(ticketData.creatorId, {
+                    SendMessages: true,
+                    ViewChannel: true,
+                }).catch(() => {});
+            }
+            await interaction.reply({ content: '✅ تم إعادة فتح التذكرة.', ephemeral: true });
+            await interaction.channel.send('🔓 **تم إعادة فتح التذكرة.**').catch(() => {});
+            return;
+        }
+
+        // زر Delete
+        if (id === 'ticket_delete') {
+            await interaction.reply({ content: 'Ticket will be deleted in a few seconds' });
+            await wait(5000);
+            activeTickets.delete(interaction.channelId);
+            await interaction.channel.delete().catch(() => {});
+            return;
+        }
+
+        // زر Claim
+        if (id === 'ticket_claim') {
+            const ticketData = activeTickets.get(interaction.channelId);
+            if (!ticketData) {
+                await interaction.reply({ content: 'هذه ليست تذكرة نشطة.', ephemeral: true });
+                return;
+            }
+            if (ticketData.claimed) {
+                await interaction.reply({ content: `التذكرة محجوزة بالفعل بواسطة <@${ticketData.claimedBy}>.`, ephemeral: true });
+                return;
+            }
+
+            ticketData.claimed   = true;
+            ticketData.claimedBy = interaction.user.id;
+
+            const claimLog = interaction.guild.channels.cache.get(TICKET_CLAIM_LOG_CHANNEL_ID)
+                ?? await interaction.guild.channels.fetch(TICKET_CLAIM_LOG_CHANNEL_ID).catch(() => null);
+            if (claimLog) {
+                await claimLog.send(
+                    `<@${interaction.user.id}> استلم التذكرة <#${interaction.channelId}>`
+                ).catch(() => {});
+            }
+
+            await interaction.reply({ content: `✅ تم استلام التذكرة بواسطة <@${interaction.user.id}>.` });
+            return;
+        }
+    }
+
+    // ───────────── قوائم الاختيار ─────────────
+    if (interaction.isStringSelectMenu()) {
+        const id    = interaction.customId;
+        const value = interaction.values[0];
+
+        if (id !== 'ticket_select_general' && id !== 'ticket_select_tik') return;
+
+        const isGeneral = id === 'ticket_select_general';
+        const categoryId = isGeneral ? TICKET_CATEGORY_GENERAL_ID : TICKET_CATEGORY_TIK_ID;
+        const guild = interaction.guild;
+        const user  = interaction.user;
+
+        // تحقق إن المستخدم ما عنده تذكرة مفتوحة في نفس الكاتوقري
+        const existing = [...activeTickets.entries()].find(
+            ([, d]) => d.creatorId === user.id && d.categoryId === categoryId
+        );
+        if (existing) {
+            await interaction.reply({ content: `عندك تذكرة مفتوحة: <#${existing[0]}>`, ephemeral: true });
+            return;
+        }
+
+        // رقم التذكرة
+        const num = (ticketCounters.get(guild.id) ?? 0) + 1;
+        ticketCounters.set(guild.id, num);
+        const channelName = `${value.replace(/_/g, '-')}-${String(num).padStart(4, '0')}`;
+
+        // صلاحيات القناة
+        const overwrites = [
+            { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+            {
+                id: user.id,
+                allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.ReadMessageHistory,
+                ],
+            },
+        ];
+        for (const roleId of ADMIN_ROLE_IDS) {
+            overwrites.push({
+                id: roleId,
+                allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.ReadMessageHistory,
+                    PermissionFlagsBits.ManageMessages,
+                ],
+            });
+        }
+
+        // إنشاء قناة التذكرة
+        const ticketChannel = await guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: categoryId,
+            permissionOverwrites: overwrites,
+            reason: `Ticket by ${user.tag}`,
+        }).catch((err) => { console.log(`[TICKET ERR] ${err.message}`); return null; });
+
+        if (!ticketChannel) {
+            await interaction.reply({ content: 'فشل إنشاء التذكرة، تأكد من صلاحيات البوت.', ephemeral: true });
+            return;
+        }
+
+        activeTickets.set(ticketChannel.id, { creatorId: user.id, type: value, categoryId, claimed: false, claimedBy: null });
+
+        // الإمبد داخل التذكرة
+        const member = await guild.members.fetch(user.id).catch(() => null);
+        const displayName = member?.displayName ?? user.username;
+
+        const welcomeEmbed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('تم فتح التذكرة بنجاح')
+            .setDescription(
+                `سيتم التواصل معك من قبل مسؤولين قريباً... شكرين لصبر تفهمكم.\n` +
+                `راجع القوانين.\n` +
+                `اسمك : **${displayName}**\n` +
+                `خيارك : **${value.replace(/_/g, ' ')}**`
+            )
+            .addFields({ name: '# . Rules', value: '@everyone' })
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+        const closeBtn = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setStyle(ButtonStyle.Danger);
+        const claimBtn = new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setStyle(ButtonStyle.Success);
+        const row = new ActionRowBuilder().addComponents(closeBtn, claimBtn);
+
+        await ticketChannel.send({ content: `<@${user.id}>`, embeds: [welcomeEmbed], components: [row] });
+        await interaction.reply({ content: `✅ تم فتح تذكرتك: <#${ticketChannel.id}>`, ephemeral: true });
     }
 });
 
