@@ -28,6 +28,8 @@ const WAIT_ROOM_ID = '1493287394466861317';
 const MEET_ROOM_ID = '1493287347788185742';
 const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
 const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
+const MESSAGE_LOG_CHANNEL_ID = '1494807380024754367';
+const messageCache = new Map();
 
 const ADMIN_VOICE_CHANNELS = new Set([
     '1492450097462771833',
@@ -744,6 +746,31 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
+        if (messageCache.size >= 1000) messageCache.delete(messageCache.keys().next().value);
+    messageCache.set(message.id, {
+        content: message.content,
+        authorId: message.author.id,
+        authorTag: message.author.tag,
+        channelName: message.channel.name ?? message.channel.id,
+        attachments: [...message.attachments.values()].map(a => a.name ?? a.url),
+    });
+
+    if (message.channel.id !== MESSAGE_LOG_CHANNEL_ID) {
+        const logCh = message.guild.channels.cache.get(MESSAGE_LOG_CHANNEL_ID)
+            ?? await message.guild.channels.fetch(MESSAGE_LOG_CHANNEL_ID).catch(() => null);
+        if (logCh) {
+            const attList = [...message.attachments.values()].map(a => a.name ?? a.url);
+            const msgEmbed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL() })
+                .setTitle(`Message in #${message.channel.name}`)
+                .setDescription(message.content || '(no text)')
+                .setFooter({ text: `ID: ${message.author.id}` })
+                .setTimestamp();
+            if (attList.length > 0) msgEmbed.addFields({ name: 'Attachments', value: attList.join('\n') });
+            await logCh.send({ embeds: [msgEmbed] }).catch(() => {});
+        }
+    }
        if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
         const hasVideo = message.attachments.some((attachment) =>
             attachment.contentType?.startsWith('video/') ||
@@ -1419,6 +1446,52 @@ client.on('guildMemberRemove', async (member) => {
             .setTimestamp();
         await channel.send({ embeds: [embed] }).catch((e) => console.log('[LEAVE SEND ERR]', e.message));
     } catch (err) { console.log(`[LEAVE LOG ERR] ${err.message}`); }
+});
+client.on('messageDelete', async (message) => {
+    if (!message.guild) return;
+
+    const cached = messageCache.get(message.id);
+    messageCache.delete(message.id);
+
+    if (!cached && message.author?.bot) return;
+
+    const authorId = cached?.authorId ?? message.author?.id ?? null;
+    const content = cached?.content ?? message.content ?? '';
+    const channelName = cached?.channelName ?? message.channel?.name ?? 'unknown';
+    const attachments = cached?.attachments ?? [...(message.attachments?.values() ?? [])].map(a => a.name ?? a.url);
+
+    let deletedBy = null;
+    try {
+        await wait(1000);
+        const logs = await message.guild.fetchAuditLogs({ type: AuditLogEvent.MessageDelete, limit: 5 });
+        const entry = [...logs.entries.values()].find(e =>
+            (!authorId || e.target?.id === authorId) &&
+            e.createdTimestamp >= Date.now() - 15000
+        );
+        if (entry?.executor && entry.executor.id !== authorId) {
+            deletedBy = entry.executor;
+        }
+    } catch {}
+
+    const logChannel = message.guild.channels.cache.get(MESSAGE_LOG_CHANNEL_ID)
+        ?? await message.guild.channels.fetch(MESSAGE_LOG_CHANNEL_ID).catch(() => null);
+    if (!logChannel) return;
+
+    const embed = new EmbedBuilder()
+        .setColor(0xED4245)
+        .setTitle(`Message deleted in #${channelName}`)
+        .setDescription(content || '(no text)');
+
+    if (authorId) embed.addFields({ name: 'Author', value: `<@${authorId}>` });
+    if (deletedBy) embed.addFields({ name: 'Deleted by', value: `<@${deletedBy.id}>` });
+    if (attachments.length > 0) embed.addFields({ name: 'Attachments', value: attachments.join('\n') });
+
+    embed
+        .addFields({ name: 'Message ID', value: message.id })
+        .setFooter({ text: `ID: ${authorId ?? 'unknown'}` })
+        .setTimestamp();
+
+    await logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
