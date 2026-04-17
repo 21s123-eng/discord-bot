@@ -1084,14 +1084,14 @@ client.on('roleUpdate', async (oldRole, newRole) => {
     }
 
     // Properties changed (with or without position change)
+       markBotAction(key);
+
     const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
 
     if (executor && isIgnored(executor.id, executor.bot)) {
         saveRole(newRole);
         return;
     }
-
-    markBotAction(key);
 
     await newRole.edit({
         name: snapshot.name,
@@ -1198,7 +1198,9 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
         ('nsfw' in newChannel && newChannel.nsfw !== snapshot.nsfw) ||
         ('rateLimitPerUser' in newChannel && newChannel.rateLimitPerUser !== snapshot.rateLimitPerUser);
 
-    if (!changed) return;
+       if (!changed) return;
+
+    markBotAction(key);
 
     const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
 
@@ -1206,8 +1208,6 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
         saveChannel(newChannel);
         return;
     }
-
-    markBotAction(key);
 
     const editPayload = { name: snapshot.name };
     if ('topic' in newChannel) editPayload.topic = snapshot.topic ?? null;
