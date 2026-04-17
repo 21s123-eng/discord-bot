@@ -1232,6 +1232,10 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 });
 
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
+        const nonEveryoneRoles = newMember.roles.cache.filter(r => r.id !== newMember.guild.id);
+    if (nonEveryoneRoles.size === 0 && !newMember.user.bot) {
+        await newMember.roles.add(UNVERIFIED_ROLE_ID).catch(() => {});
+    }
         const wasTimedOut = oldMember.communicationDisabledUntil && oldMember.communicationDisabledUntil > new Date();
     const isNowTimedOut = newMember.communicationDisabledUntil && newMember.communicationDisabledUntil > new Date();
 
