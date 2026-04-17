@@ -5,6 +5,7 @@ import {
     ChannelType,
     Partials,
     ApplicationCommandOptionType,
+    EmbedBuilder,
 } from 'discord.js';
 
 const TOKEN = process.env.TOKEN;
@@ -1365,9 +1366,59 @@ client.on('guildBanAdd', async (ban) => {
     await punish(guild, executor, 'بان عضو بدون صلاحية');
 });
 
+const MEMBER_LOG_CHANNEL_ID = '1490109091572351148';
+
 client.on('guildMemberAdd', async (member) => {
     saveMember(member);
     await member.roles.add(UNVERIFIED_ROLE_ID).catch(() => {});
+    try {
+        const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
+            ?? await member.guild.channels.fetch(MEMBER_LOG_CHANNEL_ID).catch(() => null);
+        if (!channel) return;
+        const memberCount = member.guild.memberCount;
+        const createdAt = member.user.createdAt;
+        const diffMs = Date.now() - createdAt;
+        const diffDays = Math.floor(diffMs / 86400000);
+        const years = Math.floor(diffDays / 365);
+        const months = Math.floor((diffDays % 365) / 30);
+        const days = diffDays % 30;
+        const embed = new EmbedBuilder()
+            .setColor(0x57F287)
+            .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
+            .setTitle('Member joined')
+            .setDescription(`<@${member.id}> ${memberCount}th to join\ncreated ${years} years, ${months} months and ${days} days ago`)
+            .setFooter({ text: `ID: ${member.id}` })
+            .setTimestamp();
+        await channel.send({ embeds: [embed] }).catch(() => {});
+    } catch (err) { console.log(`[JOIN LOG ERR] ${err.message}`); }
+});
+
+client.on('guildMemberRemove', async (member) => {
+    try {
+        const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
+            ?? await member.guild.channels.fetch(MEMBER_LOG_CHANNEL_ID).catch(() => null);
+        if (!channel) return;
+        const joinedAt = member.joinedAt;
+        let joinedText = 'unknown';
+        if (joinedAt) {
+            const diffMs = Date.now() - joinedAt;
+            const mins = Math.floor(diffMs / 60000);
+            const hours = Math.floor(mins / 60);
+            const days = Math.floor(hours / 24);
+            if (days > 0) joinedText = `joined ${days} days ago`;
+            else if (hours > 0) joinedText = `joined ${hours} hours and ${mins % 60} minutes ago`;
+            else joinedText = `joined ${mins} minutes ago`;
+        }
+        const roles = member.roles.cache.filter(r => r.id !== member.guild.id).map(r => `<@&${r.id}>`).join(' · ') || 'None';
+        const embed = new EmbedBuilder()
+            .setColor(0xED4245)
+            .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
+            .setTitle('Member left')
+            .setDescription(`<@${member.id}> ${joinedText}\nRoles: ${roles}`)
+            .setFooter({ text: `ID: ${member.id}` })
+            .setTimestamp();
+        await channel.send({ embeds: [embed] }).catch(() => {});
+    } catch (err) { console.log(`[LEAVE LOG ERR] ${err.message}`); }
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
