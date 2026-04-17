@@ -1367,6 +1367,7 @@ client.on('guildBanAdd', async (ban) => {
 
 client.on('guildMemberAdd', async (member) => {
     saveMember(member);
+    await member.roles.add(UNVERIFIED_ROLE_ID).catch(() => {});
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
