@@ -797,6 +797,19 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
+        const content = message.content.trim();
+
+    if (content === '!setup-ticket') {
+        await sendTicketPanel(message.channel, 'general');
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content === '!setup-ticket-tik') {
+        await sendTicketPanel(message.channel, 'tik');
+        await message.delete().catch(() => {});
+        return;
+    }
         if (messageCache.size >= 1000) messageCache.delete(messageCache.keys().next().value);
     messageCache.set(message.id, {
         content: message.content,
@@ -870,28 +883,6 @@ client.on('messageCreate', async (message) => {
                 : 'ارسال منشن في روم كليب';
 
             const timeoutNotifChannel = message.guild.channels.cache.get(TIMEOUT_LOG_CHANNEL_ID);
-                    client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.guild) return;
-
-    const content = message.content.trim();
-
-    if (content === '!setup-ticket') {
-        await sendTicketPanel(message.channel, 'general');
-        await message.delete().catch(() => {});
-        return;
-    }
-
-    if (content === '!setup-ticket-tik') {
-        await sendTicketPanel(message.channel, 'tik');
-        await message.delete().catch(() => {});
-        return;
-    }
-
-    if (messageCache.size >= 1000) messageCache.delete(messageCache.keys().next().value);
-
-    // باقي كودك يكمل هنا...
-});
             if (timeoutNotifChannel && timeoutNotifChannel.isTextBased()) {
                 await timeoutNotifChannel.send(
                     `@here\n\nperson : <@${message.author.id}>\n\nthe reason : ${timeoutReason}\n\nID : ${message.author.id}`
