@@ -1374,7 +1374,7 @@ client.on('guildMemberAdd', async (member) => {
     try {
         const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
             ?? await member.guild.channels.fetch(MEMBER_LOG_CHANNEL_ID).catch(() => null);
-        if (!channel) return;
+        if (!channel) { console.log('[JOIN] ما لقيت القناة: ' + MEMBER_LOG_CHANNEL_ID); return; }
         const memberCount = member.guild.memberCount;
         const createdAt = member.user.createdAt;
         const diffMs = Date.now() - createdAt;
@@ -1389,7 +1389,7 @@ client.on('guildMemberAdd', async (member) => {
             .setDescription(`<@${member.id}> ${memberCount}th to join\ncreated ${years} years, ${months} months and ${days} days ago`)
             .setFooter({ text: `ID: ${member.id}` })
             .setTimestamp();
-        await channel.send({ embeds: [embed] }).catch(() => {});
+      await channel.send({ embeds: [embed] }).catch((e) => console.log('[JOIN SEND ERR]', e.message));
     } catch (err) { console.log(`[JOIN LOG ERR] ${err.message}`); }
 });
 
@@ -1397,7 +1397,7 @@ client.on('guildMemberRemove', async (member) => {
     try {
         const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
             ?? await member.guild.channels.fetch(MEMBER_LOG_CHANNEL_ID).catch(() => null);
-        if (!channel) return;
+       if (!channel) { console.log('[LEAVE] ما لقيت القناة: ' + MEMBER_LOG_CHANNEL_ID); return; }
         const joinedAt = member.joinedAt;
         let joinedText = 'unknown';
         if (joinedAt) {
@@ -1417,7 +1417,7 @@ client.on('guildMemberRemove', async (member) => {
             .setDescription(`<@${member.id}> ${joinedText}\nRoles: ${roles}`)
             .setFooter({ text: `ID: ${member.id}` })
             .setTimestamp();
-        await channel.send({ embeds: [embed] }).catch(() => {});
+        await channel.send({ embeds: [embed] }).catch((e) => console.log('[LEAVE SEND ERR]', e.message));
     } catch (err) { console.log(`[LEAVE LOG ERR] ${err.message}`); }
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
