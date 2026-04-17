@@ -1366,7 +1366,7 @@ client.on('guildBanAdd', async (ban) => {
     await punish(guild, executor, 'بان عضو بدون صلاحية');
 });
 
-const MEMBER_LOG_CHANNEL_ID = '1490109091572351148';
+const MEMBER_LOG_CHANNEL_ID = '1494342769714663524';
 
 client.on('guildMemberAdd', async (member) => {
     saveMember(member);
