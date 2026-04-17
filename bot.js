@@ -144,6 +144,8 @@ const memberRoleSnapshots = new Map();
 const botActions = new Set();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
+const channelUpdateLocks = new Map();
+const channelRestoreLogCooldowns = new Map();
 
 const restoringRoles = new Set();
 const restoringChannels = new Set();
@@ -162,6 +164,8 @@ const AUDIT_RETRIES = 4;
 const AUDIT_WAIT_MS = 400;
 const PUNISH_COOLDOWN_MS = 5000;
 const AVATAR_SEPARATOR_COOLDOWN_MS = 3000;
+const CHANNEL_UPDATE_LOCK_MS = 10000;
+const CHANNEL_RESTORE_LOG_COOLDOWN_MS = 10000;
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -201,6 +205,35 @@ function punishOnCooldown(guildId, userId, reason) {
     }
 
     punishCooldowns.set(key, Date.now());
+    return false;
+}
+function channelUpdateLocked(key) {
+    const until = channelUpdateLocks.get(key);
+
+    if (until && until > Date.now()) {
+        return true;
+    }
+
+    channelUpdateLocks.set(key, Date.now() + CHANNEL_UPDATE_LOCK_MS);
+    setTimeout(() => {
+        const currentUntil = channelUpdateLocks.get(key);
+        if (currentUntil && currentUntil <= Date.now()) {
+            channelUpdateLocks.delete(key);
+        }
+    }, CHANNEL_UPDATE_LOCK_MS + 500);
+
+    return false;
+}
+
+function channelRestoreLogOnCooldown(guildId, executorId, reason) {
+    const key = `${guildId}:${executorId ?? 'unknown'}:${reason}`;
+    const last = channelRestoreLogCooldowns.get(key);
+
+    if (last && Date.now() - last < CHANNEL_RESTORE_LOG_COOLDOWN_MS) {
+        return true;
+    }
+
+    channelRestoreLogCooldowns.set(key, Date.now());
     return false;
 }
 
@@ -1500,7 +1533,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 
     const key = channelKey(newChannel.guild.id, newChannel.id);
 
-    if (isBotAction(key)) {
+    if (restoringChannels.has(newChannel.guild.id) || isBotAction(key) || channelUpdateLocked(key)) {
         saveChannel(newChannel);
         return;
     }
@@ -1525,7 +1558,7 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
 
        if (!changed) return;
 
-    markBotAction(key);
+   markBotAction(key, CHANNEL_UPDATE_LOCK_MS);
 
     const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
 
@@ -1552,7 +1585,9 @@ client.on('channelUpdate', async (oldChannel, newChannel) => {
         await newChannel.permissionOverwrites.set(toOverwrites(snapshot), 'Protection rollback channel permissions').catch(() => {});
     }
 
+    if (!channelRestoreLogOnCooldown(newChannel.guild.id, executor?.id, 'تعديل روم')) {
     await sendLog(newChannel.guild, `رجعت تغيير روم: ${snapshot.name}`);
+}
     await punish(newChannel.guild, executor, 'تعديل روم');
 });
 
