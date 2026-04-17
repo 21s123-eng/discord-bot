@@ -1398,6 +1398,13 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
 client.on('channelCreate', async (channel) => {
     if (!channel.guild) return;
+        if (
+        (channel.parentId === TICKET_CATEGORY_GENERAL_ID || channel.parentId === TICKET_CATEGORY_TIK_ID) &&
+        /-\d{4}$/.test(channel.name)
+    ) {
+        saveChannel(channel);
+        return;
+    }
 
     const key = channelKey(channel.guild.id, channel.id);
 
