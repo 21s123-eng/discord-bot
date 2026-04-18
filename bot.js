@@ -2188,6 +2188,33 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
                 await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
             }
+                        if (oldState.channelId && !newState.channelId) {
+                const auditLogs = await newState.guild.fetchAuditLogs({
+                    type: AuditLogEvent.MemberDisconnect,
+                    limit: 5,
+                }).catch(() => null);
+
+                const disconnectEntry = auditLogs?.entries.find((entry) =>
+                    entry.executor?.id &&
+                    entry.executor.id !== client.user?.id &&
+                    Date.now() - entry.createdTimestamp < 7000
+                );
+
+                if (disconnectEntry) {
+                    const embed = new EmbedBuilder()
+                        .setColor(0xED4245)
+                        .setTitle('طرد من روم صوتي')
+                        .addFields(
+                            { name: 'اللي طرد', value: `<@${disconnectEntry.executor.id}>`, inline: true },
+                            { name: 'اللي انطرد', value: `<@${member.id}>`, inline: true },
+                            { name: 'الروم', value: `<#${oldState.channelId}>`, inline: true }
+                        )
+                        .setFooter({ text: `ID: ${member.id}` })
+                        .setTimestamp();
+
+                    await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+                }
+            }
 
             if (oldState.serverMute !== newState.serverMute) {
                 const executor = await getAuditExecutor(newState.guild, AuditLogEvent.MemberUpdate, member.id, true);
