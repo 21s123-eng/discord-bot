@@ -39,6 +39,7 @@ const TICKET_CATEGORY_GENERAL_ID = '1490131505387933807';
 const TICKET_CATEGORY_TIK_ID = '1494815199784603738';
 const TICKET_CATEGORY_GENERAL_2_ID = '1495089181179773038';
 const TICKET_CATEGORY_RANK_ID = '1495100386132889682';
+const TICKET_CATEGORY_STRE_ID = '1490108866678231050';
 const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
 
 const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
@@ -87,6 +88,7 @@ const TICKET_CLAIM_ROLE_CONFIG = {
     [TICKET_CATEGORY_GENERAL_ID]: GENERAL_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_GENERAL_2_ID]: GENERAL_2_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_TIK_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_STRE_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_RANK_ID]: RANK_TICKET_CLAIM_ROLE_IDS,
 };
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
@@ -1174,6 +1176,8 @@ async function createTicket(interaction, value, categoryId) {
         await interaction.reply({ content: 'فشل إنشاء التذكرة، تأكد من صلاحيات البوت.', ephemeral: true });
         return;
     }
+        markBotAction(channelKey(guild.id, ticketChannel.id));
+    saveChannel(ticketChannel);
 
     activeTickets.set(ticketChannel.id, {
         creatorId: user.id,
@@ -1395,12 +1399,12 @@ client.on('interactionCreate', async (interaction) => {
 
        if (id !== 'ticket_select_general' && id !== 'ticket_select_general_2' && id !== 'ticket_select_tik') return;
 
-        const categoryId =
-    id === 'ticket_select_tik'
-        ? TICKET_CATEGORY_TIK_ID
-        : id === 'ticket_select_general_2'
-            ? TICKET_CATEGORY_GENERAL_2_ID
-            : TICKET_CATEGORY_GENERAL_ID;
+               const categoryId =
+            id === 'ticket_select_tik'
+                ? (value === 'stre' ? TICKET_CATEGORY_STRE_ID : TICKET_CATEGORY_TIK_ID)
+                : id === 'ticket_select_general_2'
+                    ? TICKET_CATEGORY_GENERAL_2_ID
+                    : TICKET_CATEGORY_GENERAL_ID;
         const guild = interaction.guild;
         const user  = interaction.user;
 
@@ -1456,6 +1460,8 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({ content: 'فشل إنشاء التذكرة، تأكد من صلاحيات البوت.', ephemeral: true });
             return;
         }
+                markBotAction(channelKey(guild.id, ticketChannel.id));
+        saveChannel(ticketChannel);
 
         activeTickets.set(ticketChannel.id, { creatorId: user.id, type: value, categoryId, claimed: false, claimedBy: null });
 
@@ -1711,8 +1717,14 @@ client.on('roleUpdate', async (oldRole, newRole) => {
 
 client.on('channelCreate', async (channel) => {
     if (!channel.guild) return;
-        if (
-        (channel.parentId === TICKET_CATEGORY_GENERAL_ID || channel.parentId === TICKET_CATEGORY_TIK_ID) &&
+         if (
+        (
+            channel.parentId === TICKET_CATEGORY_GENERAL_ID ||
+            channel.parentId === TICKET_CATEGORY_GENERAL_2_ID ||
+            channel.parentId === TICKET_CATEGORY_TIK_ID ||
+            channel.parentId === TICKET_CATEGORY_STRE_ID ||
+            channel.parentId === TICKET_CATEGORY_RANK_ID
+        ) &&
         /-\d{4}$/.test(channel.name)
     ) {
         saveChannel(channel);
