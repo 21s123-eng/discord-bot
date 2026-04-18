@@ -38,6 +38,7 @@ const messageCache = new Map();
 const TICKET_CATEGORY_GENERAL_ID = '1490131505387933807';
 const TICKET_CATEGORY_TIK_ID = '1494815199784603738';
 const TICKET_CATEGORY_GENERAL_2_ID = '1495089181179773038';
+const TICKET_CATEGORY_RANK_ID = '1495100386132889682';
 const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
 
 const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
@@ -71,11 +72,22 @@ const TIK_TICKET_CLAIM_ROLE_IDS = new Set([
     '1494831143697252372',
     '1492989594445283489',
 ]);
+const RANK_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1495045657050742784',
+    '1495045645780910160',
+    '1495045612264231133',
+    '1495045913591414846',
+    '1491822347181756597',
+    '1491823288249356409',
+    '1491811256896589905',
+    '1490156350896996413',
+]);
 
 const TICKET_CLAIM_ROLE_CONFIG = {
     [TICKET_CATEGORY_GENERAL_ID]: GENERAL_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_GENERAL_2_ID]: GENERAL_2_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_TIK_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_RANK_ID]: RANK_TICKET_CLAIM_ROLE_IDS,
 };
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
 const ticketCounters = new Map(); // guildId → number
@@ -150,6 +162,30 @@ function hasAnyRole(member, roleIds) {
 
 function isAdminMember(member) {
     return hasAnyRole(member, ADMIN_ROLE_IDS);
+}
+async function assignUnverifiedIfNoRoles(member, reason = 'Auto assign unverified') {
+    if (!member || member.user.bot) return;
+
+    const roles = member.roles.cache.filter((role) => role.id !== member.guild.id);
+
+    if (roles.size > 0) return;
+
+    const role = member.guild.roles.cache.get(UNVERIFIED_ROLE_ID)
+        ?? await member.guild.roles.fetch(UNVERIFIED_ROLE_ID).catch(() => null);
+
+    if (!role) {
+        console.log(`[AUTO UNVERIFIED ERR] الرتبة غير موجودة: ${UNVERIFIED_ROLE_ID}`);
+        return;
+    }
+
+    markBotAction(memberKey(member.guild.id, member.id));
+
+    await member.roles.add(role, reason).catch((err) => {
+        console.log(`[AUTO UNVERIFIED ERR] ${member.user.tag} — ${err.message}`);
+    });
+
+    const updated = await member.guild.members.fetch(member.id).catch(() => member);
+    saveMember(updated);
 }
 
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
@@ -852,6 +888,26 @@ async function clearMessages(interaction, amount) {
     return deletedTotal;
 }
 async function sendTicketPanel(channel, type) {
+        if (type === 'rank') {
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('𝟎𝟖')
+            .setDescription(
+                '**تقديم على رتبه**\n\n' +
+                '**اضغط الزر بالأسفل لفتح تذكرة تقديم على رتبه.**'
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('open_ticket_rank')
+                .setLabel('تقديم على رتبه')
+                .setStyle(ButtonStyle.Primary)
+        );
+
+        await channel.send({ embeds: [embed], components: [row] });
+        return;
+    }
     if (type === 'general' || type === 'general_2') {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
@@ -901,6 +957,11 @@ client.once('ready', async () => {
     for (const [, guild] of client.guilds.cache) {
         await registerClearCommand(guild);
         await snapshotGuild(guild).catch((error) => {
+                    await guild.members.fetch().catch(() => {});
+
+        for (const [, member] of guild.members.cache) {
+            await assignUnverifiedIfNoRoles(member, 'Startup scan: member has no roles');
+        }
             console.log(`[SNAPSHOT ERR] ${error.message}`);
         });
     }
@@ -923,6 +984,11 @@ client.on('messageCreate', async (message) => {
     }
         if (content === '!setup-ticket-2') {
         await sendTicketPanel(message.channel, 'general_2');
+        await message.delete().catch(() => {});
+        return;
+    }
+        if (content === '!setup-ticket-rank') {
+        await sendTicketPanel(message.channel, 'rank');
         await message.delete().catch(() => {});
         return;
     }
@@ -1049,6 +1115,95 @@ client.on('messageCreate', async (message) => {
 
     await handleAvatarSeparator(message);
 });
+async function createTicket(interaction, value, categoryId) {
+    const guild = interaction.guild;
+    const user = interaction.user;
+
+    const existing = [...activeTickets.entries()].find(
+        ([, d]) => d.creatorId === user.id && d.categoryId === categoryId
+    );
+
+    if (existing) {
+        await interaction.reply({ content: `عندك تذكرة مفتوحة: <#${existing[0]}>`, ephemeral: true });
+        return;
+    }
+
+    const num = (ticketCounters.get(guild.id) ?? 0) + 1;
+    ticketCounters.set(guild.id, num);
+
+    const channelName = `${value.replace(/_/g, '-')}-${String(num).padStart(4, '0')}`;
+    const claimRoleIds = TICKET_CLAIM_ROLE_CONFIG[categoryId] ?? GENERAL_TICKET_CLAIM_ROLE_IDS;
+
+    const overwrites = [
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        {
+            id: user.id,
+            allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+            ],
+        },
+    ];
+
+    for (const roleId of claimRoleIds) {
+        overwrites.push({
+            id: roleId,
+            allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+                PermissionFlagsBits.ManageMessages,
+            ],
+        });
+    }
+
+    const ticketChannel = await guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        parent: categoryId,
+        permissionOverwrites: overwrites,
+        reason: `Ticket by ${user.tag}`,
+    }).catch((err) => {
+        console.log(`[TICKET ERR] ${err.message}`);
+        return null;
+    });
+
+    if (!ticketChannel) {
+        await interaction.reply({ content: 'فشل إنشاء التذكرة، تأكد من صلاحيات البوت.', ephemeral: true });
+        return;
+    }
+
+    activeTickets.set(ticketChannel.id, {
+        creatorId: user.id,
+        type: value,
+        categoryId,
+        claimed: false,
+        claimedBy: null,
+    });
+
+    const member = await guild.members.fetch(user.id).catch(() => null);
+    const displayName = member?.displayName ?? user.username;
+
+    const welcomeEmbed = new EmbedBuilder()
+        .setColor(0x2b2d31)
+        .setTitle('تم فتح التذكرة بنجاح')
+        .setDescription(
+            `سيتم التواصل معك من قبل مسؤولين قريباً... شكرين لصبر تفهمكم.\n` +
+            `راجع القوانين.\n` +
+            `اسمك : **${displayName}**\n` +
+            `خيارك : **${value.replace(/_/g, ' ')}**`
+        )
+        .addFields({ name: '# . Rules', value: '@everyone' })
+        .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+    const closeBtn = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setStyle(ButtonStyle.Danger);
+    const claimBtn = new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setStyle(ButtonStyle.Success);
+    const row = new ActionRowBuilder().addComponents(closeBtn, claimBtn);
+
+    await ticketChannel.send({ content: `<@${user.id}>`, embeds: [welcomeEmbed], components: [row] });
+    await interaction.reply({ content: `✅ تم فتح تذكرتك: <#${ticketChannel.id}>`, ephemeral: true });
+}
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
@@ -1130,6 +1285,10 @@ client.on('interactionCreate', async (interaction) => {
 
             const row = new ActionRowBuilder().addComponents(select);
             await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
+            return;
+        }
+                if (id === 'open_ticket_rank') {
+            await createTicket(interaction, 'تقديم_على_رتبه', TICKET_CATEGORY_RANK_ID);
             return;
         }
 
@@ -1779,18 +1938,8 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         }
     }
 
+        await assignUnverifiedIfNoRoles(newMember, 'Auto-assign: member has no roles');
     saveMember(newMember);
-
-    if (newMember.user.bot) return;
-
-    const nonEveryoneRoles = newMember.roles.cache.filter((r) => r.id !== newMember.guild.id);
-
-    if (nonEveryoneRoles.size === 0) {
-        console.log(`[AUTO UNVERIFIED] ${newMember.user.tag} has no roles — assigning unverified`);
-        await newMember.roles.add(UNVERIFIED_ROLE_ID, 'Auto-assign: member has no roles').catch((err) => {
-            console.log(`[AUTO UNVERIFIED ERR] ${newMember.user.tag} — ${err.message}`);
-        });
-    }
 });
 client.on('guildBanAdd', async (ban) => {
     const guild = ban.guild;
@@ -1815,8 +1964,7 @@ client.on('guildBanAdd', async (ban) => {
 const MEMBER_LOG_CHANNEL_ID = '1494797903754035332';
 
 client.on('guildMemberAdd', async (member) => {
-    saveMember(member);
-    await member.roles.add(UNVERIFIED_ROLE_ID).catch(() => {});
+        await assignUnverifiedIfNoRoles(member, 'Member join: assign unverified role');
     try {
         const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
             ?? await member.guild.channels.fetch(MEMBER_LOG_CHANNEL_ID).catch(() => null);
