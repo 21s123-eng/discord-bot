@@ -954,18 +954,19 @@ async function sendTicketPanel(channel, type) {
 client.once('ready', async () => {
     console.log(`[Bot] Online as ${client.user.tag}`);
 
-    for (const [, guild] of client.guilds.cache) {
+        for (const [, guild] of client.guilds.cache) {
         await registerClearCommand(guild);
+
         await snapshotGuild(guild).catch((error) => {
-                    await guild.members.fetch().catch(() => {});
+            console.log(`[SNAPSHOT ERR] ${error.message}`);
+        });
+
+        await guild.members.fetch().catch(() => {});
 
         for (const [, member] of guild.members.cache) {
             await assignUnverifiedIfNoRoles(member, 'Startup scan: member has no roles');
         }
-            console.log(`[SNAPSHOT ERR] ${error.message}`);
-        });
     }
-
     console.log('[Bot] Protection active');
     console.log('[Bot] Verify active');
     console.log('[Bot] Avatar separator active');
