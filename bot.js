@@ -12,6 +12,10 @@ import {
     StringSelectMenuBuilder,
     PermissionFlagsBits,
 } from 'discord.js';
+import {
+    joinVoiceChannel,
+    getVoiceConnection,
+} from '@discordjs/voice';
 
 const TOKEN = process.env.TOKEN;
 
@@ -91,6 +95,7 @@ const TICKET_CLAIM_ROLE_CONFIG = {
     [TICKET_CATEGORY_STRE_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_RANK_ID]: RANK_TICKET_CLAIM_ROLE_IDS,
 };
+const voiceConnections = new Map();
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
 const ticketCounters = new Map(); // guildId → number
 
@@ -188,6 +193,47 @@ async function assignUnverifiedIfNoRoles(member, reason = 'Auto assign unverifie
 
     const updated = await member.guild.members.fetch(member.id).catch(() => member);
     saveMember(updated);
+    }
+
+    async function joinBotVoiceChannel(message, channelId) {
+    if (message.author.id !== OWNER_ID) return true;
+
+    const channel = await message.guild.channels.fetch(channelId).catch(() => null);
+
+    if (!channel || (channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice)) {
+        await message.reply('الروم الصوتي غير صحيح.');
+        return true;
+    }
+
+    const connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: message.guild.id,
+        adapterCreator: message.guild.voiceAdapterCreator,
+        selfDeaf: true,
+        selfMute: false,
+    });
+
+    voiceConnections.set(message.guild.id, connection);
+
+    await message.reply(`دخلت الروم: ${channel.name}`);
+    return true;
+}
+
+async function leaveBotVoiceChannel(message) {
+    if (message.author.id !== OWNER_ID) return true;
+
+    const connection = getVoiceConnection(message.guild.id);
+
+    if (!connection) {
+        await message.reply('البوت مو داخل روم صوتي.');
+        return true;
+    }
+
+    connection.destroy();
+    voiceConnections.delete(message.guild.id);
+
+    await message.reply('طلعت من الروم الصوتي.');
+    return true;
 }
 
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
@@ -270,6 +316,20 @@ const CHANNEL_RESTORE_LOG_COOLDOWN_MS = 10000;
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+    async function moveChannelToCategoryBottom(channel) {
+    await wait(1000);
+
+    const parent = channel.parent;
+    if (!parent) return;
+
+    const channels = parent.children.cache
+        .filter((ch) => ch.type === channel.type)
+        .sort((a, b) => a.rawPosition - b.rawPosition);
+
+    await channel.setPosition(channels.size - 1).catch((err) => {
+        console.log(`[TICKET POSITION ERR] ${err.message}`);
+    });
 }
 
 function roleKey(guildId, roleId) {
@@ -979,6 +1039,24 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.guild) return;
         const content = message.content.trim();
+        if (content.startsWith('!join-voice')) {
+        const channelId = content.split(/\s+/)[1] ?? message.member?.voice?.channelId;
+
+        if (!channelId) {
+            await message.reply('اكتب ايدي الروم الصوتي أو ادخل روم واكتب الأمر.');
+            return;
+        }
+
+        await joinBotVoiceChannel(message, channelId);
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content === '!leave-voice') {
+        await leaveBotVoiceChannel(message);
+        await message.delete().catch(() => {});
+        return;
+    }
 
     if (content === '!setup-ticket') {
         await sendTicketPanel(message.channel, 'general');
@@ -1178,6 +1256,7 @@ async function createTicket(interaction, value, categoryId) {
     }
         markBotAction(channelKey(guild.id, ticketChannel.id));
     saveChannel(ticketChannel);
+    await moveChannelToCategoryBottom(ticketChannel);
 
     activeTickets.set(ticketChannel.id, {
         creatorId: user.id,
@@ -1462,6 +1541,7 @@ client.on('interactionCreate', async (interaction) => {
         }
                 markBotAction(channelKey(guild.id, ticketChannel.id));
         saveChannel(ticketChannel);
+        await moveChannelToCategoryBottom(ticketChannel);
 
         activeTickets.set(ticketChannel.id, { creatorId: user.id, type: value, categoryId, claimed: false, claimedBy: null });
 
