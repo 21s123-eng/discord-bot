@@ -1848,6 +1848,17 @@ client.on('channelDelete', async (channel) => {
     const snapshot = channelSnapshots.get(key);
 
     if (!snapshot) return;
+            if (
+        snapshot.parentId === TICKET_CATEGORY_GENERAL_ID ||
+        snapshot.parentId === TICKET_CATEGORY_GENERAL_2_ID ||
+        snapshot.parentId === TICKET_CATEGORY_TIK_ID ||
+        snapshot.parentId === TICKET_CATEGORY_STRE_ID ||
+        snapshot.parentId === TICKET_CATEGORY_RANK_ID
+    ) {
+        channelSnapshots.delete(key);
+        activeTickets.delete(channel.id);
+        return;
+    }
 
     const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelDelete, channel.id);
 
