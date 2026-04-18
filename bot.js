@@ -36,9 +36,47 @@ const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
 const MESSAGE_LOG_CHANNEL_ID = '1494807380024754367';
 const messageCache = new Map();
 const TICKET_CATEGORY_GENERAL_ID = '1490131505387933807';
-const TICKET_CATEGORY_TIK_ID     = '1494815199784603738';
+const TICKET_CATEGORY_TIK_ID = '1494815199784603738';
+const TICKET_CATEGORY_GENERAL_2_ID = '1495089181179773038';
 const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
 
+const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1490156350896996413',
+    '1491811256896589905',
+    '1491823288249356409',
+    '1491822347181756597',
+    '1491831219393134745',
+    '1491831219963433080',
+    '1491831217627074582',
+    '1491831209834319952',
+    '1491831212573200506',
+    '1491821748801507409',
+]);
+
+const GENERAL_2_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1495045802685366423',
+    '1495045776823549992',
+    '1495045761224675398',
+    '1495045740903534622',
+    '1495045718086516868',
+    '1495045700856188949',
+    '1495045657050742784',
+    '1495045645780910160',
+    '1495045612264231133',
+    '1495045913591414846',
+    '1490156350896996413',
+]);
+
+const TIK_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1494831143697252372',
+    '1492989594445283489',
+]);
+
+const TICKET_CLAIM_ROLE_CONFIG = {
+    [TICKET_CATEGORY_GENERAL_ID]: GENERAL_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_GENERAL_2_ID]: GENERAL_2_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_TIK_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
+};
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
 const ticketCounters = new Map(); // guildId → number
 
@@ -814,7 +852,7 @@ async function clearMessages(interaction, amount) {
     return deletedTotal;
 }
 async function sendTicketPanel(channel, type) {
-    if (type === 'general') {
+    if (type === 'general' || type === 'general_2') {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
             .setTitle('𝟎𝟖')
@@ -830,7 +868,10 @@ async function sendTicketPanel(channel, type) {
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_general').setLabel('افتح تذكرة').setStyle(ButtonStyle.Primary)
+           new ButtonBuilder()
+    .setCustomId(type === 'general_2' ? 'open_ticket_general_2' : 'open_ticket_general')
+    .setLabel('افتح تذكرة')
+    .setStyle(ButtonStyle.Primary)
         );
         await channel.send({ embeds: [embed], components: [row] });
     } else {
@@ -877,6 +918,11 @@ client.on('messageCreate', async (message) => {
 
     if (content === '!setup-ticket') {
         await sendTicketPanel(message.channel, 'general');
+        await message.delete().catch(() => {});
+        return;
+    }
+        if (content === '!setup-ticket-2') {
+        await sendTicketPanel(message.channel, 'general_2');
         await message.delete().catch(() => {});
         return;
     }
@@ -1072,6 +1118,20 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
             return;
         }
+                if (id === 'open_ticket_general_2') {
+            const select = new StringSelectMenuBuilder()
+                .setCustomId('ticket_select_general_2')
+                .setPlaceholder('اختر نوع التذكرة')
+                .addOptions([
+                    { label: 'تقديم اداره',  value: 'تقديم_اداره' },
+                    { label: 'مشكله',        value: 'مشكله' },
+                    { label: 'استفسار',      value: 'استفسار' },
+                ]);
+
+            const row = new ActionRowBuilder().addComponents(select);
+            await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
+            return;
+        }
 
         // زر فتح تذكرة تقديم
         if (id === 'open_ticket_tik') {
@@ -1100,7 +1160,7 @@ client.on('interactionCreate', async (interaction) => {
             const deleteBtn = new ButtonBuilder().setCustomId('ticket_delete').setLabel('Delete').setStyle(ButtonStyle.Danger);
             const row = new ActionRowBuilder().addComponents(openBtn, deleteBtn);
 
-            await interaction.reply({ content: '🔒 تم إغلاق التذكرة. اختر إجراء:', components: [row], ephemeral: true });
+           await interaction.reply({ content: '🔒 تم إغلاق التذكرة. اختر إجراء:', components: [row] });
             await interaction.channel.send('🔒 **تم إغلاق التذكرة.**').catch(() => {});
             return;
         }
@@ -1120,13 +1180,12 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // زر Delete
-        if (id === 'ticket_delete') {
-            await interaction.reply({ content: 'Ticket will be deleted in a few seconds' });
-            await wait(5000);
-            activeTickets.delete(interaction.channelId);
-            await interaction.channel.delete().catch(() => {});
-            return;
-        }
+       if (id === 'ticket_delete') {
+    await interaction.reply({ content: 'جاري حذف التذكرة...' }).catch(() => {});
+    activeTickets.delete(interaction.channelId);
+    await interaction.channel.delete().catch(() => {});
+    return;
+}
 
         // زر Claim
                if (id === 'ticket_claim') {
@@ -1137,9 +1196,7 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
-            const allowedRoles = ticketData.categoryId === TICKET_CATEGORY_TIK_ID
-                ? TIK_TICKET_CLAIM_ROLE_IDS
-                : GENERAL_TICKET_CLAIM_ROLE_IDS;
+            const allowedRoles = TICKET_CLAIM_ROLE_CONFIG[ticketData.categoryId] ?? GENERAL_TICKET_CLAIM_ROLE_IDS;
 
             const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
             const canClaim = member?.roles.cache.some((role) => allowedRoles.has(role.id));
@@ -1176,10 +1233,14 @@ client.on('interactionCreate', async (interaction) => {
         const id    = interaction.customId;
         const value = interaction.values[0];
 
-        if (id !== 'ticket_select_general' && id !== 'ticket_select_tik') return;
+       if (id !== 'ticket_select_general' && id !== 'ticket_select_general_2' && id !== 'ticket_select_tik') return;
 
-        const isGeneral = id === 'ticket_select_general';
-        const categoryId = isGeneral ? TICKET_CATEGORY_GENERAL_ID : TICKET_CATEGORY_TIK_ID;
+        const categoryId =
+    id === 'ticket_select_tik'
+        ? TICKET_CATEGORY_TIK_ID
+        : id === 'ticket_select_general_2'
+            ? TICKET_CATEGORY_GENERAL_2_ID
+            : TICKET_CATEGORY_GENERAL_ID;
         const guild = interaction.guild;
         const user  = interaction.user;
 
@@ -1197,7 +1258,8 @@ client.on('interactionCreate', async (interaction) => {
         ticketCounters.set(guild.id, num);
         const channelName = `${value.replace(/_/g, '-')}-${String(num).padStart(4, '0')}`;
 
-        // صلاحيات القناة
+     // صلاحيات القناة
+        const claimRoleIds = TICKET_CLAIM_ROLE_CONFIG[categoryId] ?? GENERAL_TICKET_CLAIM_ROLE_IDS;
         const overwrites = [
             { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
             {
@@ -1209,7 +1271,7 @@ client.on('interactionCreate', async (interaction) => {
                 ],
             },
         ];
-        for (const roleId of ADMIN_ROLE_IDS) {
+        for (const roleId of claimRoleIds) {
             overwrites.push({
                 id: roleId,
                 allow: [
