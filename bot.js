@@ -38,6 +38,7 @@ const SECOND_WAIT_ROOM_ID = '1495053611128852670';
 const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
 const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
 const MESSAGE_LOG_CHANNEL_ID = '1494807380024754367';
+const VOICE_LOG_CHANNEL_ID = '1495169802363342848';
 const messageCache = new Map();
 const TICKET_CATEGORY_GENERAL_ID = '1490131505387933807';
 const TICKET_CATEGORY_TIK_ID = '1494815199784603738';
@@ -2165,6 +2166,62 @@ client.on('messageDelete', async (message) => {
     await logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
+        {
+        const member = newState.member ?? oldState.member;
+
+        if (!member || member.user.bot) return;
+
+        const voiceLogChannel = newState.guild.channels.cache.get(VOICE_LOG_CHANNEL_ID)
+            ?? await newState.guild.channels.fetch(VOICE_LOG_CHANNEL_ID).catch(() => null);
+
+        if (voiceLogChannel?.isTextBased()) {
+            if (newState.channelId && oldState.channelId !== newState.channelId) {
+                const embed = new EmbedBuilder()
+                    .setColor(0x5865F2)
+                    .setTitle('دخول روم صوتي')
+                    .addFields(
+                        { name: 'الشخص', value: `<@${member.id}>`, inline: true },
+                        { name: 'الروم', value: `<#${newState.channelId}>`, inline: true }
+                    )
+                    .setFooter({ text: `ID: ${member.id}` })
+                    .setTimestamp();
+
+                await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+            }
+
+            if (oldState.serverMute !== newState.serverMute) {
+                const executor = await getAuditExecutor(newState.guild, AuditLogEvent.MemberUpdate, member.id, true);
+
+                const embed = new EmbedBuilder()
+                    .setColor(newState.serverMute ? 0xED4245 : 0x57F287)
+                    .setTitle(newState.serverMute ? 'ميوت سيرفر' : 'فك ميوت سيرفر')
+                    .addFields(
+                        { name: newState.serverMute ? 'اللي عطى الميوت' : 'اللي فك الميوت', value: executor ? `<@${executor.id}>` : 'غير معروف', inline: true },
+                        { name: newState.serverMute ? 'انعطى لـ' : 'انفك من', value: `<@${member.id}>`, inline: true }
+                    )
+                    .setFooter({ text: `ID: ${member.id}` })
+                    .setTimestamp();
+
+                await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+            }
+
+            if (oldState.serverDeaf !== newState.serverDeaf) {
+                const executor = await getAuditExecutor(newState.guild, AuditLogEvent.MemberUpdate, member.id, true);
+
+                const embed = new EmbedBuilder()
+                    .setColor(newState.serverDeaf ? 0xED4245 : 0x57F287)
+                    .setTitle(newState.serverDeaf ? 'دفن سيرفر' : 'فك دفن سيرفر')
+                    .addFields(
+                        { name: newState.serverDeaf ? 'اللي عطى الدفن' : 'اللي فك الدفن', value: executor ? `<@${executor.id}>` : 'غير معروف', inline: true },
+                        { name: newState.serverDeaf ? 'انعطى لـ' : 'انفك من', value: `<@${member.id}>`, inline: true }
+                    )
+                    .setFooter({ text: `ID: ${member.id}` })
+                    .setTimestamp();
+
+                await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+            }
+        }
+    }
     const config = VOICE_MOVE_CONFIGS[newState.channelId];
 
     if (!config) return;
