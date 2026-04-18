@@ -30,7 +30,7 @@ const VIDEO_REACTIONS = ['🔥', '🤣'];
 const MEDIA_ONLY_TIMEOUT_MS = 5 * 60 * 1000;
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
 const WAIT_ROOM_ID = '1493287394466861317';
-const MEET_ROOM_ID = '1493287347788185742';
+const SECOND_WAIT_ROOM_ID = '1495053611128852670';
 const TIMEOUT_LOG_CHANNEL_ID = '1494342102979444736';
 const SERVER_LOG_CHANNEL_ID = '1494342769714663524';
 const MESSAGE_LOG_CHANNEL_ID = '1494807380024754367';
@@ -42,18 +42,18 @@ const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
 const ticketCounters = new Map(); // guildId → number
 
-const ADMIN_VOICE_CHANNELS = new Set([
-    '1492450097462771833',
-    '1492450059307192381',
-    '1492450015703076884',
-    '1492449967535816744',
-    '1492449717186072606',
-    '1492449616761852095',
-    '1492449475912925214',
-    '1492449422230032535',
-    '1492449365611249715',
+const ADMIN_VOICE_CHANNELS = [
     '1492449319184502794',
-]);
+    '1492449365611249715',
+    '1492449422230032535',
+    '1492449475912925214',
+    '1492449616761852095',
+    '1492449717186072606',
+    '1492449967535816744',
+    '1492450015703076884',
+    '1492450059307192381',
+    '1492450097462771833',
+];
 
 const ADMIN_ROLE_IDS = new Set([
     '1491821748801507409',
@@ -65,28 +65,53 @@ const ADMIN_ROLE_IDS = new Set([
     '1491822347181756597',
     '1491823288249356409',
     '1491811256896589905',
-]);
-const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
     '1490156350896996413',
-    '1491811256896589905',
-    '1491823288249356409',
-    '1491822347181756597',
-    '1491831219393134745',
-    '1491831219963433080',
-    '1491831217627074582',
-    '1491831209834319952',
-    '1491831212573200506',
-    '1491821748801507409',
 ]);
 
-const TIK_TICKET_CLAIM_ROLE_IDS = new Set([
-    '1492989594445283489',
-    '1494831143697252372',
+const SECOND_ADMIN_VOICE_CHANNELS = [
+    '1495053174816509963',
+    '1495053278063497357',
+    '1495053225185775706',
+    '1495053313757020201',
+    '1495053344815714414',
+    '1495053381700681728',
+    '1495053418887381132',
+    '1495053454354153513',
+    '1495053492560199762',
+    '1495053536776421618',
+];
+
+const SECOND_ADMIN_ROLE_IDS = new Set([
+    '1495045802685366423',
+    '1495045776823549992',
+    '1495045761224675398',
+    '1495045740903534622',
+    '1495045718086516868',
+    '1495045700856188949',
+    '1495045657050742784',
+    '1495045645780910160',
+    '1495045612264231133',
+    '1495045913591414846',
     '1490156350896996413',
 ]);
+
+const VOICE_MOVE_CONFIGS = {
+    [WAIT_ROOM_ID]: {
+        channels: ADMIN_VOICE_CHANNELS,
+        roles: ADMIN_ROLE_IDS,
+    },
+    [SECOND_WAIT_ROOM_ID]: {
+        channels: SECOND_ADMIN_VOICE_CHANNELS,
+        roles: SECOND_ADMIN_ROLE_IDS,
+    },
+};
+
+function hasAnyRole(member, roleIds) {
+    return member.roles.cache.some((role) => roleIds.has(role.id));
+}
 
 function isAdminMember(member) {
-    return member.roles.cache.some((role) => ADMIN_ROLE_IDS.has(role.id));
+    return hasAnyRole(member, ADMIN_ROLE_IDS);
 }
 
 const LINK_REGEX = /https?:\/\/\S+|www\.\S+/i;
@@ -1826,7 +1851,9 @@ client.on('messageDelete', async (message) => {
     await logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    if (![WAIT_ROOM_ID, MEET_ROOM_ID].includes(newState.channelId)) return;
+    const config = VOICE_MOVE_CONFIGS[newState.channelId];
+
+    if (!config) return;
     if (!newState.member) return;
     if (newState.member.user.bot) return;
 
@@ -1842,7 +1869,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     let targetChannel = null;
     let debugInfo = '';
 
-    for (const channelId of ADMIN_VOICE_CHANNELS) {
+    for (const channelId of config.channels) {
         const adminChannel = await guild.channels.fetch(channelId).catch(() => null);
 
         if (!adminChannel || !adminChannel.isVoiceBased()) {
@@ -1852,17 +1879,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
         const members = [...adminChannel.members.values()].filter((member) => !member.user.bot);
 
-        const admins = members.filter((member) => isAdminMember(member));
-        const citizens = members.filter((member) => !isAdminMember(member));
+        const admins = members.filter((member) => hasAnyRole(member, config.roles));
+        const nonAdmins = members.filter((member) => !hasAnyRole(member, config.roles));
 
         const botPerms = adminChannel.permissionsFor(botMember);
         const canView = botPerms?.has('ViewChannel');
         const canConnect = botPerms?.has('Connect');
         const canMove = botMember.permissions.has('MoveMembers');
 
-        debugInfo += `\nروم ${channelId}: إدارة=${admins.length} مواطن=${citizens.length} view=${canView} connect=${canConnect} move=${canMove}`;
+        debugInfo += `\nروم ${channelId}: إدارة=${admins.length} غير_إدارة=${nonAdmins.length} view=${canView} connect=${canConnect} move=${canMove}`;
 
-        if (admins.length > 0 && citizens.length === 0) {
+        if (admins.length > 0 && nonAdmins.length === 0) {
             if (!canView || !canConnect || !canMove) {
                 debugInfo += ` — مناسب لكن صلاحيات البوت ناقصة`;
                 continue;
@@ -1882,7 +1909,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
     await logChannel?.send(`[VOICE] بحاول أرفع <@${newState.member.id}> إلى <#${targetChannel.id}>`).catch(() => {});
 
-    await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to admin room without citizens').catch(async (err) => {
+    await newState.member.voice.setChannel(targetChannel.id, 'Auto-move to admin-only room').catch(async (err) => {
         await logChannel?.send(`[VOICE ERR] فشل الرفع إلى <#${targetChannel.id}>: ${err.message}`).catch(() => {});
     });
 });
