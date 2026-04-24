@@ -1339,7 +1339,6 @@ client.on('messageCreate', async (message) => {
                 `👤 **أكثر الأداريين استلاماً:**\n${claimLines}`
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
-            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
         await message.channel.send({ embeds: [embed] }).catch(() => {});
         await message.delete().catch(() => {});
         return;
