@@ -16,6 +16,7 @@ import {
     joinVoiceChannel,
     getVoiceConnection,
 } from '@discordjs/voice';
+import fs from 'fs';
 
 const TOKEN = process.env.TOKEN;
 
@@ -114,6 +115,73 @@ const TICKET_CLAIM_ROLE_CONFIG = {
 const voiceConnections = new Map();
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
 const ticketCounters = new Map(); // guildId → number
+const ticketStats = new Map(); // guildId → { categoryId: count }
+const TICKET_STATS_FILE = './ticket_stats.json';
+
+function loadTicketStats() {
+    try {
+        if (!fs.existsSync(TICKET_STATS_FILE)) return;
+        const raw = fs.readFileSync(TICKET_STATS_FILE, 'utf8');
+        const data = JSON.parse(raw);
+        for (const [guildId, stats] of Object.entries(data)) {
+            ticketStats.set(guildId, stats);
+        }
+    } catch (err) {
+        console.log(`[TICKET STATS LOAD ERR] ${err.message}`);
+    }
+}
+
+function saveTicketStats() {
+    try {
+        const obj = Object.fromEntries(ticketStats);
+        fs.writeFileSync(TICKET_STATS_FILE, JSON.stringify(obj, null, 2));
+    } catch (err) {
+        console.log(`[TICKET STATS SAVE ERR] ${err.message}`);
+    }
+}
+
+function incrementTicketStat(guildId, categoryId) {
+    const stats = ticketStats.get(guildId) ?? {};
+    stats[categoryId] = (stats[categoryId] ?? 0) + 1;
+    ticketStats.set(guildId, stats);
+    saveTicketStats();
+}
+
+loadTicketStats();
+
+const ticketClaimStats = new Map(); // guildId → { userId: count }
+const TICKET_CLAIM_STATS_FILE = './ticket_claim_stats.json';
+
+function loadTicketClaimStats() {
+    try {
+        if (!fs.existsSync(TICKET_CLAIM_STATS_FILE)) return;
+        const raw = fs.readFileSync(TICKET_CLAIM_STATS_FILE, 'utf8');
+        const data = JSON.parse(raw);
+        for (const [guildId, claims] of Object.entries(data)) {
+            ticketClaimStats.set(guildId, claims);
+        }
+    } catch (err) {
+        console.log(`[TICKET CLAIM STATS LOAD ERR] ${err.message}`);
+    }
+}
+
+function saveTicketClaimStats() {
+    try {
+        const obj = Object.fromEntries(ticketClaimStats);
+        fs.writeFileSync(TICKET_CLAIM_STATS_FILE, JSON.stringify(obj, null, 2));
+    } catch (err) {
+        console.log(`[TICKET CLAIM STATS SAVE ERR] ${err.message}`);
+    }
+}
+
+function incrementTicketClaim(guildId, userId) {
+    const claims = ticketClaimStats.get(guildId) ?? {};
+    claims[userId] = (claims[userId] ?? 0) + 1;
+    ticketClaimStats.set(guildId, claims);
+    saveTicketClaimStats();
+}
+
+loadTicketClaimStats();
 
 const ADMIN_VOICE_CHANNELS = [
     '1492449319184502794',
@@ -918,7 +986,7 @@ async function handleSendCommand(message) {
     const isOwner = message.author.id === OWNER_ID;
     if (!isOwner) {
         const senderMember = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
-        const hasPermission = senderMember && senderMember.roles.cache.some((role) => SEND_COMMAND_ROLE_IDS.has(role.id));
+        const hasPermission = senderMember && senderMember.roles.cache.has('1490156350896996413');
         if (!hasPermission) return false;
     }
 
@@ -1074,15 +1142,15 @@ async function sendTicketPanel(channel, type) {
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-                const row = new ActionRowBuilder().addComponents(
+                               const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('open_ticket_buy_purchase').setLabel('شراء').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('open_ticket_buy_complaint').setLabel('شكوى').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('open_ticket_buy_purchase_en').setLabel('Purchase').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('open_ticket_buy_inquiry').setLabel('استفسار').setStyle(ButtonStyle.Primary),
         );
         const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_buy_purchase_en').setLabel('Purchase').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('open_ticket_buy_complaint_en').setLabel('Complaint').setStyle(ButtonStyle.Danger),
             new ButtonBuilder().setCustomId('open_ticket_buy_inquiry_en').setLabel('Inquiry').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('open_ticket_buy_complaint_en').setLabel('Complaint').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('open_ticket_buy_complaint').setLabel('شكوى').setStyle(ButtonStyle.Danger),
         );
         await channel.send({ embeds: [embed], components: [row, row2] });
         return;
@@ -1105,7 +1173,7 @@ async function sendTicketPanel(channel, type) {
         await channel.send({ embeds: [embed], components: [row] });
         return;
     }
-     if (type === 'general' || type === 'general_2') {
+         if (type === 'general' || type === 'general_2') {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
             .setTitle('𝟎𝟖')
@@ -1120,14 +1188,20 @@ async function sendTicketPanel(channel, type) {
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-        const row = new ActionRowBuilder().addComponents(
-           new ButtonBuilder()
-    .setCustomId(type === 'general_2' ? 'open_ticket_general_2' : 'open_ticket_general')
-    .setLabel('افتح تذكرة')
-    .setStyle(ButtonStyle.Primary)
-        );
+        const select = new StringSelectMenuBuilder()
+            .setCustomId(type === 'general_2' ? 'ticket_select_general_2' : 'ticket_select_general')
+            .setPlaceholder('اختر نوع التذكرة')
+            .addOptions([
+                { label: 'تقديم اداره',  value: 'تقديم_اداره' },
+                { label: 'Application for an administrative position', value: 'admin_application' },
+                { label: 'استفسار',      value: 'استفسار' },
+                { label: 'Inquiry',      value: 'inquiry' },
+                { label: 'مشكله',        value: 'مشكله' },
+                { label: 'Issue',        value: 'issue' },
+            ]);
+        const row = new ActionRowBuilder().addComponents(select);
         await channel.send({ embeds: [embed], components: [row] });
-    } else {
+        } else {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
             .setTitle('𝟎𝟖')
@@ -1142,9 +1216,16 @@ async function sendTicketPanel(channel, type) {
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_tik').setLabel('افتح تذكرة').setStyle(ButtonStyle.Primary)
-        );
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('ticket_select_tik')
+            .setPlaceholder('اختر نوع التقديم')
+            .addOptions([
+                { label: 'تقديم على 𝘛𝘪𝘬', value: 'tik' },
+                { label: 'Application for 𝘛𝘪𝘬', value: 'tik_en' },
+                { label: 'تقديم على 𝘚𝘵𝘳𝘦', value: 'stre' },
+                { label: 'Application for 𝘚𝘵𝘳𝘦', value: 'stre_en' },
+            ]);
+        const row = new ActionRowBuilder().addComponents(select);
         await channel.send({ embeds: [embed], components: [row] });
     }
 }
@@ -1223,6 +1304,43 @@ client.on('messageCreate', async (message) => {
 
     if (content === '!setup-ticket-sub') {
         await sendTicketPanel(message.channel, 'sub');
+        await message.delete().catch(() => {});
+        return;
+    }
+    
+    if (content === '!ticketstats') {
+        const member = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (!member || !hasAnyRole(member, SEND_COMMAND_ROLE_IDS)) {
+            await message.reply('ما عندك صلاحية.').catch(() => {});
+            return;
+        }
+               const stats = ticketStats.get(message.guild.id) ?? {};
+        const total = Object.values(stats).reduce((a, b) => a + b, 0);
+        const lines = [
+            `📂 **General**: ${stats[TICKET_CATEGORY_GENERAL_ID] ?? 0}`,
+            `📂 **General 2**: ${stats[TICKET_CATEGORY_GENERAL_2_ID] ?? 0}`,
+            `📂 **Tik**: ${stats[TICKET_CATEGORY_TIK_ID] ?? 0}`,
+            `📂 **Stre**: ${stats[TICKET_CATEGORY_STRE_ID] ?? 0}`,
+            `📂 **Rank**: ${stats[TICKET_CATEGORY_RANK_ID] ?? 0}`,
+            `📂 **Buy**: ${stats[TICKET_CATEGORY_BUY_ID] ?? 0}`,
+            `📂 **Sub**: ${stats[TICKET_CATEGORY_SUB_ID] ?? 0}`,
+        ];
+        const claims = ticketClaimStats.get(message.guild.id) ?? {};
+        const sortedClaims = Object.entries(claims).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        const claimLines = sortedClaims.length
+            ? sortedClaims.map(([userId, count], i) => `${i + 1}. <@${userId}> — **${count}** استلام`).join('\n')
+            : 'لا يوجد استلامات بعد.';
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('📊 إحصائيات التذاكر')
+            .setDescription(
+                lines.join('\n') +
+                `\n─────────────\n**الإجمالي:** ${total} تذكرة\n\n` +
+                `👤 **أكثر الأداريين استلاماً:**\n${claimLines}`
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
         await message.delete().catch(() => {});
         return;
     }
@@ -1379,6 +1497,7 @@ async function createTicket(interaction, value, categoryId) {
 
     const num = (ticketCounters.get(guild.id) ?? 0) + 1;
     ticketCounters.set(guild.id, num);
+    incrementTicketStat(guild.id, categoryId);
 
     const channelName = `${value.replace(/_/g, '-')}-${String(num).padStart(4, '0')}`;
     const claimRoleIds = TICKET_CLAIM_ROLE_CONFIG[categoryId] ?? GENERAL_TICKET_CLAIM_ROLE_IDS;
@@ -1461,7 +1580,8 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     if (interaction.commandName !== CLEAR_COMMAND_NAME) return;
 
-    if (interaction.user.id !== OWNER_ID) {
+    const clearMember = interaction.member ?? await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+    if (interaction.user.id !== OWNER_ID && !(clearMember && clearMember.roles.cache.has('1490156350896996413'))) {
         await interaction.reply({
             content: 'هذا الأمر للمالك فقط.',
             ephemeral: true,
@@ -1632,6 +1752,7 @@ client.on('interactionCreate', async (interaction) => {
 
             ticketData.claimed = true;
             ticketData.claimedBy = interaction.user.id;
+            incrementTicketClaim(interaction.guild.id, interaction.user.id);
 
             const claimLog = interaction.guild.channels.cache.get(TICKET_CLAIM_LOG_CHANNEL_ID)
                 ?? await interaction.guild.channels.fetch(TICKET_CLAIM_LOG_CHANNEL_ID).catch(() => null);
@@ -1713,6 +1834,7 @@ client.on('interactionCreate', async (interaction) => {
         // رقم التذكرة
         const num = (ticketCounters.get(guild.id) ?? 0) + 1;
         ticketCounters.set(guild.id, num);
+        incrementTicketStat(guild.id, categoryId);
         const channelName = `${value.replace(/_/g, '-')}-${String(num).padStart(4, '0')}`;
 
      // صلاحيات القناة
