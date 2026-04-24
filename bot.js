@@ -30,6 +30,7 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
 const VIDEO_REACTION_CHANNEL_ID = '1490108870524276876';
+const VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID = '1497203030678962356';
 const VIDEO_REACTIONS = ['🔥', '🤣'];
 const MEDIA_ONLY_TIMEOUT_MS = 5 * 60 * 1000;
 const ROLE_LOG_CHANNEL_ID = '1493286656235540611';
@@ -45,6 +46,8 @@ const TICKET_CATEGORY_TIK_ID = '1494815199784603738';
 const TICKET_CATEGORY_GENERAL_2_ID = '1495089181179773038';
 const TICKET_CATEGORY_RANK_ID = '1495100386132889682';
 const TICKET_CATEGORY_STRE_ID = '1490108866678231050';
+const TICKET_CATEGORY_BUY_ID = '1497184252314386514';
+const TICKET_CATEGORY_SUB_ID = '1497195629636485160';
 const TICKET_CLAIM_LOG_CHANNEL_ID = '1494815750777471198';
 
 const GENERAL_TICKET_CLAIM_ROLE_IDS = new Set([
@@ -89,12 +92,24 @@ const RANK_TICKET_CLAIM_ROLE_IDS = new Set([
     '1490156350896996413',
 ]);
 
+const BUY_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1497186534250512506',
+    '1490156350896996413',
+]);
+
+const SUB_TICKET_CLAIM_ROLE_IDS = new Set([
+    '1490156350896996413',
+    '1497199596449824880',
+]);
+
 const TICKET_CLAIM_ROLE_CONFIG = {
     [TICKET_CATEGORY_GENERAL_ID]: GENERAL_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_GENERAL_2_ID]: GENERAL_2_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_TIK_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_STRE_ID]: TIK_TICKET_CLAIM_ROLE_IDS,
     [TICKET_CATEGORY_RANK_ID]: RANK_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_BUY_ID]: BUY_TICKET_CLAIM_ROLE_IDS,
+    [TICKET_CATEGORY_SUB_ID]: SUB_TICKET_CLAIM_ROLE_IDS,
 };
 const voiceConnections = new Map();
 const activeTickets  = new Map(); // channelId → { creatorId, type, categoryId, claimed }
@@ -163,6 +178,27 @@ const VOICE_MOVE_CONFIGS = {
         roles: SECOND_ADMIN_ROLE_IDS,
     },
 };
+
+const VOICE_TRANSLATE_CHANNEL_IDS = new Set([
+    '1497195392461181072',
+    '1497195357749252186',
+    '1497195328624001155',
+    '1497195296206225458',
+    '1497195264992219276',
+]);
+
+const SEND_COMMAND_ROLE_IDS = new Set([
+    '1491823288249356409',
+    '1491811256896589905',
+    '1490156350896996413',
+]);
+
+const RATING_TRIGGER_ROLE_IDS = new Set([
+    '1497186534250512506',
+    '1490156350896996413',
+]);
+
+const RATING_TRIGGER_KEYWORD = '@&@&@';
 
 function hasAnyRole(member, roleIds) {
     return member.roles.cache.some((role) => roleIds.has(role.id));
@@ -264,6 +300,11 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1490109021506765060',
     '1493533721637158922',
     '1490108870524276876',
+    '1497201552304373980',
+    '1497201288859881513',
+    '1497201943897047082',
+    '1490111448754421850',
+    '1497203030678962356',
 ]);
 
 console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
@@ -317,6 +358,47 @@ const CHANNEL_RESTORE_LOG_COOLDOWN_MS = 10000;
 
 function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function translateText(text, targetLang) {
+    try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const data = await response.json();
+        if (!Array.isArray(data) || !Array.isArray(data[0])) return null;
+        return data[0].map((part) => part[0]).filter(Boolean).join('').trim();
+    } catch (error) {
+        console.log(`[TRANSLATE ERR] ${error.message}`);
+        return null;
+    }
+}
+
+function detectIsArabic(text) {
+    return /[\u0600-\u06FF]/.test(text);
+}
+
+async function handleTranslateMessage(message) {
+    const text = message.content.trim();
+    if (!text) return;
+
+    const cleanText = text
+        .replace(/<@!?\d+>/g, '')
+        .replace(/<@&\d+>/g, '')
+        .replace(/<#\d+>/g, '')
+        .replace(/<a?:\w+:\d+>/g, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .trim();
+
+    if (!cleanText) return;
+
+    const isArabic = detectIsArabic(cleanText);
+    const targetLang = isArabic ? 'en' : 'ar';
+    const translated = await translateText(cleanText, targetLang);
+
+    if (!translated || translated.toLowerCase() === cleanText.toLowerCase()) return;
+
+    await message.channel.send(`<@${message.author.id}> | ${translated}`).catch(() => {});
 }
     async function moveChannelToCategoryBottom(channel) {
     await wait(1000);
@@ -833,6 +915,13 @@ async function registerClearCommand(guild) {
 async function handleSendCommand(message) {
     if (!message.content.startsWith('!send ')) return false;
 
+    const isOwner = message.author.id === OWNER_ID;
+    if (!isOwner) {
+        const senderMember = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
+        const hasPermission = senderMember && senderMember.roles.cache.some((role) => SEND_COMMAND_ROLE_IDS.has(role.id));
+        if (!hasPermission) return false;
+    }
+
     const args = message.content.slice('!send '.length).trim();
     const firstSpace = args.indexOf(' ');
 
@@ -844,8 +933,8 @@ async function handleSendCommand(message) {
     }
 
     const channelId = (firstSpace === -1 ? args : args.slice(0, firstSpace))
-    .replace(/[<#>]/g, '')
-    .trim();
+        .replace(/[<#>]/g, '')
+        .trim();
 
     const text = firstSpace === -1 ? '' : args.slice(firstSpace + 1).trim();
 
@@ -867,30 +956,29 @@ async function handleSendCommand(message) {
     }
 
     try {
-       await channel.send({
-    content: text || undefined,
-    files: attachments.map((attachment) => attachment.url),
-});
+        await channel.send({
+            content: text || undefined,
+            files: attachments.map((attachment) => attachment.url),
+        });
 
-if (attachments.length > 0) {
-    await wait(700);
+        if (attachments.length > 0) {
+            await wait(700);
 
-    await channel.send({
-        files: [AVATAR_SEPARATOR_FILE],
-    }).catch(async (error) => {
-        console.log(`[SEPARATOR ERR] ${error.message}`);
-        await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
-    });
-}
+            await channel.send({
+                files: [AVATAR_SEPARATOR_FILE],
+            }).catch(async (error) => {
+                console.log(`[SEPARATOR ERR] ${error.message}`);
+                await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
+            });
+        }
 
-await message.reply('تم إرسال الرسالة.').catch(() => {});
+        await message.reply('تم إرسال الرسالة.').catch(() => {});
     } catch (error) {
         await message.reply(`ما قدرت أرسلها: ${error.message}`).catch(() => {});
     }
 
     return true;
 }
-
 async function handleVerifyMessageCommand(message) {
     if (!message.content.startsWith('!verifymsg')) return false;
 
@@ -971,7 +1059,44 @@ async function sendTicketPanel(channel, type) {
         await channel.send({ embeds: [embed], components: [row] });
         return;
     }
-    if (type === 'general' || type === 'general_2') {
+        
+    if (type === 'buy') {
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('𝟎𝟖')
+            .setDescription(
+                '**افتح تذكرة**\n\n' +
+                '**اختر نوع التذكرة من الأزرار بالأسفل.**'
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket_buy_purchase').setLabel('شراء').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('open_ticket_buy_complaint').setLabel('شكوى').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('open_ticket_buy_inquiry').setLabel('استفسار').setStyle(ButtonStyle.Primary),
+        );
+        await channel.send({ embeds: [embed], components: [row] });
+        return;
+    }
+
+    if (type === 'sub') {
+        const embed = new EmbedBuilder()
+            .setColor(0x2b2d31)
+            .setTitle('𝟎𝟖')
+            .setDescription(
+                '**افتح تذكرة**\n\n' +
+                '**اختر نوع التذكرة من الأزرار بالأسفل.**'
+            )
+            .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket_sub_inquiry').setLabel('Inquiry').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('open_ticket_sub_subscription').setLabel('Subscription').setStyle(ButtonStyle.Success),
+        );
+        await channel.send({ embeds: [embed], components: [row] });
+        return;
+    }
+     if (type === 'general' || type === 'general_2') {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
             .setTitle('𝟎𝟖')
@@ -1080,6 +1205,27 @@ client.on('messageCreate', async (message) => {
         await message.delete().catch(() => {});
         return;
     }
+    
+    if (content === '!setup-ticket-buy') {
+        await sendTicketPanel(message.channel, 'buy');
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content === '!setup-ticket-sub') {
+        await sendTicketPanel(message.channel, 'sub');
+        await message.delete().catch(() => {});
+        return;
+    }
+
+    if (content === RATING_TRIGGER_KEYWORD) {
+        const ratingMember = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (ratingMember && ratingMember.roles.cache.some((role) => RATING_TRIGGER_ROLE_IDS.has(role.id))) {
+            await message.delete().catch(() => {});
+            await message.channel.send('"وجّه رسالة لمن سيشتري بعدك (تقييم)"\n\n@here').catch(() => {});
+            return;
+        }
+    }
         if (messageCache.size >= 1000) messageCache.delete(messageCache.keys().next().value);
     messageCache.set(message.id, {
         content: message.content,
@@ -1105,10 +1251,17 @@ client.on('messageCreate', async (message) => {
             await logCh.send({ embeds: [msgEmbed] }).catch(() => {});
         }
     }
-       if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
+              if (message.channel.id === VIDEO_REACTION_CHANNEL_ID || message.channel.id === VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID) {
+        const allowImages = message.channel.id === VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID;
+
         const hasVideo = message.attachments.some((attachment) =>
             attachment.contentType?.startsWith('video/') ||
             /\.(mp4|mov|webm|mkv|avi)$/i.test(attachment.name ?? attachment.url)
+        );
+
+        const hasImage = message.attachments.some((attachment) =>
+            attachment.contentType?.startsWith('image/') ||
+            /\.(png|jpg|jpeg|gif|webp)$/i.test(attachment.name ?? attachment.url)
         );
 
         if (message.author.id === OWNER_ID) {
@@ -1131,24 +1284,22 @@ client.on('messageCreate', async (message) => {
             .trim();
 
         const hasRealText = textWithoutMentions.length > 0;
+        const hasAllowedMedia = hasVideo || (allowImages && hasImage);
 
-        if (!hasVideo || hasRealText) {
+        if (!hasAllowedMedia || hasRealText) {
             await message.delete().catch(() => {});
 
             const member = await message.guild.members.fetch(message.author.id).catch(() => null);
 
             if (member) {
-                await member.timeout(MEDIA_ONLY_TIMEOUT_MS, 'روم مخصص للفيديو فقط').catch((err) => {
+                await member.timeout(MEDIA_ONLY_TIMEOUT_MS, 'روم مخصص للوسائط فقط').catch((err) => {
                     console.log(`[VIDEO ONLY TIMEOUT ERR] ${err.message}`);
                 });
-                       }
+            }
 
-                      const timeoutReason = hasRealText
+            const timeoutReason = hasRealText
                 ? 'ارسال كتابه في روم كليب'
-                : message.attachments.some((a) =>
-                    a.contentType?.startsWith('image/') ||
-                    /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name ?? a.url)
-                  )
+                : (hasImage && !allowImages)
                 ? 'ارسال صوره في روم كليب'
                 : 'ارسال منشن في روم كليب';
 
@@ -1162,10 +1313,12 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
-        for (const emoji of VIDEO_REACTIONS) {
-            await message.react(emoji).catch((err) => {
-                console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
-            });
+        if (hasVideo) {
+            for (const emoji of VIDEO_REACTIONS) {
+                await message.react(emoji).catch((err) => {
+                    console.log(`[VIDEO REACT ERR] ${emoji} — ${err.message}`);
+                });
+            }
         }
 
         return;
@@ -1190,9 +1343,14 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    if (message.author.id === OWNER_ID) {
         if (await handleSendCommand(message)) return;
+
+    if (message.author.id === OWNER_ID) {
         if (await handleVerifyMessageCommand(message)) return;
+    }
+
+        if (VOICE_TRANSLATE_CHANNEL_IDS.has(message.channel.id) && message.content.trim().length > 0) {
+        await handleTranslateMessage(message);
     }
 
     await handleAvatarSeparator(message);
@@ -1468,6 +1626,27 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             await interaction.reply({ content: `✅ تم استلام التذكرة بواسطة <@${interaction.user.id}>.` });
+            return;
+        }
+        
+        if (id === 'open_ticket_buy_purchase') {
+            await createTicket(interaction, 'شراء', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_buy_complaint') {
+            await createTicket(interaction, 'شكوى', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_buy_inquiry') {
+            await createTicket(interaction, 'استفسار', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_sub_inquiry') {
+            await createTicket(interaction, 'Inquiry', TICKET_CATEGORY_SUB_ID);
+            return;
+        }
+        if (id === 'open_ticket_sub_subscription') {
+            await createTicket(interaction, 'Subscription', TICKET_CATEGORY_SUB_ID);
             return;
         }
     }
@@ -1804,7 +1983,9 @@ client.on('channelCreate', async (channel) => {
             channel.parentId === TICKET_CATEGORY_GENERAL_2_ID ||
             channel.parentId === TICKET_CATEGORY_TIK_ID ||
             channel.parentId === TICKET_CATEGORY_STRE_ID ||
-            channel.parentId === TICKET_CATEGORY_RANK_ID
+            channel.parentId === TICKET_CATEGORY_RANK_ID ||
+            channel.parentId === TICKET_CATEGORY_BUY_ID ||
+            channel.parentId === TICKET_CATEGORY_SUB_ID
         ) &&
         /-\d{4}$/.test(channel.name)
     ) {
@@ -1854,7 +2035,9 @@ client.on('channelDelete', async (channel) => {
         snapshot.parentId === TICKET_CATEGORY_GENERAL_2_ID ||
         snapshot.parentId === TICKET_CATEGORY_TIK_ID ||
         snapshot.parentId === TICKET_CATEGORY_STRE_ID ||
-        snapshot.parentId === TICKET_CATEGORY_RANK_ID
+        snapshot.parentId === TICKET_CATEGORY_RANK_ID ||
+        snapshot.parentId === TICKET_CATEGORY_BUY_ID ||
+        snapshot.parentId === TICKET_CATEGORY_SUB_ID
     ) {
         channelSnapshots.delete(key);
         activeTickets.delete(channel.id);
@@ -2044,6 +2227,18 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
     }
 
         await assignUnverifiedIfNoRoles(newMember, 'Auto-assign: member has no roles');
+    
+    if (newMember.roles.cache.has(UNVERIFIED_ROLE_ID)) {
+        const otherRoles = newMember.roles.cache.filter(
+            (role) => role.id !== newMember.guild.id && role.id !== UNVERIFIED_ROLE_ID
+        );
+        if (otherRoles.size > 0) {
+            markBotAction(memberKey(newMember.guild.id, newMember.id));
+            await newMember.roles.remove(UNVERIFIED_ROLE_ID, 'Has other roles, removing unverified').catch((err) => {
+                console.log(`[REMOVE UNVERIFIED ERR] ${err.message}`);
+            });
+        }
+    }
     saveMember(newMember);
 });
 client.on('guildBanAdd', async (ban) => {
@@ -2187,6 +2382,36 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                     .setTimestamp();
 
                 await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+            }
+            
+            if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+                const moveLogs = await newState.guild.fetchAuditLogs({
+                    type: AuditLogEvent.MemberMove,
+                    limit: 5,
+                }).catch(() => null);
+
+                const moveEntry = moveLogs?.entries.find((entry) =>
+                    entry.executor?.id &&
+                    entry.executor.id !== client.user?.id &&
+                    entry.executor.id !== member.id &&
+                    Date.now() - entry.createdTimestamp < 7000
+                );
+
+                if (moveEntry) {
+                    const embed = new EmbedBuilder()
+                        .setColor(0xFEE75C)
+                        .setTitle('سحب من روم لروم')
+                        .addFields(
+                            { name: 'اللي سحب', value: `<@${moveEntry.executor.id}>`, inline: true },
+                            { name: 'اللي انسحب', value: `<@${member.id}>`, inline: true },
+                            { name: 'من روم', value: `<#${oldState.channelId}>`, inline: true },
+                            { name: 'إلى روم', value: `<#${newState.channelId}>`, inline: true }
+                        )
+                        .setFooter({ text: `ID: ${member.id}` })
+                        .setTimestamp();
+
+                    await voiceLogChannel.send({ embeds: [embed] }).catch(() => {});
+                }
             }
                         if (oldState.channelId && !newState.channelId) {
                 const auditLogs = await newState.guild.fetchAuditLogs({
