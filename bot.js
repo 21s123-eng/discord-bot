@@ -31,6 +31,7 @@ const UNVERIFIED_ROLE_ID = '1491831215219806248';
 const AVATAR_SEPARATOR_FILE = './separator.png';
 
 const VIDEO_REACTION_CHANNEL_ID = '1490108870524276876';
+const VIDEO_REACTION_CHANNEL_2_ID = '1490111448754421850';
 const VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID = '1497203030678962356';
 const VIDEO_REACTIONS = ['🔥', '🤣'];
 const MEDIA_ONLY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -1113,46 +1114,45 @@ async function sendTicketPanel(channel, type) {
             .setTitle('𝟎𝟖')
             .setDescription(
                 '**تقديم على رتبه**\n\n' +
-                '**اضغط الزر بالأسفل لفتح تذكرة تقديم على رتبه.**'
+                '**اختر نوع التقديم من القائمة بالأسفل.**'
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-               const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('open_ticket_rank')
-                .setLabel('تقديم على رتبه')
-                .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-                .setCustomId('open_ticket_rank_en')
-                .setLabel('Application')
-                .setStyle(ButtonStyle.Primary)
-        );
-
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('ticket_select_rank')
+            .setPlaceholder('اختر نوع التذكرة')
+            .addOptions([
+                { label: 'تقديم على رتبه', value: 'تقديم_على_رتبه' },
+                { label: 'Application',     value: 'Application' },
+            ]);
+        const row = new ActionRowBuilder().addComponents(select);
         await channel.send({ embeds: [embed], components: [row] });
         return;
     }
-        
+
     if (type === 'buy') {
         const embed = new EmbedBuilder()
             .setColor(0x2b2d31)
             .setTitle('𝟎𝟖')
             .setDescription(
                 '**افتح تذكرة**\n\n' +
-                '**اختر نوع التذكرة من الأزرار بالأسفل.**'
+                '**اختر نوع التذكرة من القائمة بالأسفل.**'
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-                               const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_buy_purchase').setLabel('شراء').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('open_ticket_buy_purchase_en').setLabel('Purchase').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('open_ticket_buy_inquiry').setLabel('استفسار').setStyle(ButtonStyle.Primary),
-        );
-        const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_buy_inquiry_en').setLabel('Inquiry').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('open_ticket_buy_complaint_en').setLabel('Complaint').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId('open_ticket_buy_complaint').setLabel('شكوى').setStyle(ButtonStyle.Danger),
-        );
-        await channel.send({ embeds: [embed], components: [row, row2] });
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('ticket_select_buy')
+            .setPlaceholder('اختر نوع التذكرة')
+            .addOptions([
+                { label: 'شراء',      value: 'شراء' },
+                { label: 'Purchase',  value: 'Purchase' },
+                { label: 'استفسار',   value: 'استفسار' },
+                { label: 'Inquiry',   value: 'Inquiry' },
+                { label: 'شكوى',      value: 'شكوى' },
+                { label: 'Complaint', value: 'Complaint' },
+            ]);
+        const row = new ActionRowBuilder().addComponents(select);
+        await channel.send({ embeds: [embed], components: [row] });
         return;
     }
 
@@ -1162,14 +1162,18 @@ async function sendTicketPanel(channel, type) {
             .setTitle('𝟎𝟖')
             .setDescription(
                 '**افتح تذكرة**\n\n' +
-                '**اختر نوع التذكرة من الأزرار بالأسفل.**'
+                '**اختر نوع التذكرة من القائمة بالأسفل.**'
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('open_ticket_sub_inquiry').setLabel('Inquiry').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('open_ticket_sub_subscription').setLabel('Subscription').setStyle(ButtonStyle.Success),
-        );
+        const select = new StringSelectMenuBuilder()
+            .setCustomId('ticket_select_sub')
+            .setPlaceholder('اختر نوع التذكرة')
+            .addOptions([
+                { label: 'Inquiry',      value: 'Inquiry' },
+                { label: 'Subscription', value: 'Subscription' },
+            ]);
+        const row = new ActionRowBuilder().addComponents(select);
         await channel.send({ embeds: [embed], components: [row] });
         return;
     }
@@ -1377,7 +1381,7 @@ client.on('messageCreate', async (message) => {
             await logCh.send({ embeds: [msgEmbed] }).catch(() => {});
         }
     }
-              if (message.channel.id === VIDEO_REACTION_CHANNEL_ID || message.channel.id === VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID) {
+                if (message.channel.id === VIDEO_REACTION_CHANNEL_ID || message.channel.id === VIDEO_REACTION_CHANNEL_2_ID || message.channel.id === VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID) {
         const allowImages = message.channel.id === VIDEO_REACTION_CHANNEL_ALLOW_IMAGES_ID;
 
         const hasVideo = message.attachments.some((attachment) =>
@@ -1664,10 +1668,6 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
             return;
         }
-                if (id === 'open_ticket_rank') {
-            await createTicket(interaction, 'تقديم_على_رتبه', TICKET_CATEGORY_RANK_ID);
-            return;
-        }
 
         // زر فتح تذكرة تقديم
         if (id === 'open_ticket_tik') {
@@ -1766,43 +1766,6 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
         
-        if (id === 'open_ticket_buy_purchase') {
-            await createTicket(interaction, 'شراء', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_buy_complaint') {
-            await createTicket(interaction, 'شكوى', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_buy_inquiry') {
-            await createTicket(interaction, 'استفسار', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_sub_inquiry') {
-            await createTicket(interaction, 'Inquiry', TICKET_CATEGORY_SUB_ID);
-            return;
-        }
-        if (id === 'open_ticket_sub_subscription') {
-            await createTicket(interaction, 'Subscription', TICKET_CATEGORY_SUB_ID);
-            return;
-        }
-        
-        if (id === 'open_ticket_buy_purchase_en') {
-            await createTicket(interaction, 'Purchase', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_buy_complaint_en') {
-            await createTicket(interaction, 'Complaint', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_buy_inquiry_en') {
-            await createTicket(interaction, 'Inquiry', TICKET_CATEGORY_BUY_ID);
-            return;
-        }
-        if (id === 'open_ticket_rank_en') {
-            await createTicket(interaction, 'Application', TICKET_CATEGORY_RANK_ID);
-            return;
-        }
     }
 
     // ───────────── قوائم الاختيار ─────────────
@@ -1810,14 +1773,20 @@ client.on('interactionCreate', async (interaction) => {
         const id    = interaction.customId;
         const value = interaction.values[0];
 
-       if (id !== 'ticket_select_general' && id !== 'ticket_select_general_2' && id !== 'ticket_select_tik') return;
+       if (id !== 'ticket_select_general' && id !== 'ticket_select_general_2' && id !== 'ticket_select_tik' && id !== 'ticket_select_rank' && id !== 'ticket_select_buy' && id !== 'ticket_select_sub') return;
 
-               const categoryId =
+                   const categoryId =
             id === 'ticket_select_tik'
                 ? ((value === 'stre' || value === 'stre_en') ? TICKET_CATEGORY_STRE_ID : TICKET_CATEGORY_TIK_ID)
                 : id === 'ticket_select_general_2'
                     ? TICKET_CATEGORY_GENERAL_2_ID
-                    : TICKET_CATEGORY_GENERAL_ID;
+                    : id === 'ticket_select_rank'
+                        ? TICKET_CATEGORY_RANK_ID
+                        : id === 'ticket_select_buy'
+                            ? TICKET_CATEGORY_BUY_ID
+                            : id === 'ticket_select_sub'
+                                ? TICKET_CATEGORY_SUB_ID
+                                : TICKET_CATEGORY_GENERAL_ID;
         const guild = interaction.guild;
         const user  = interaction.user;
 
