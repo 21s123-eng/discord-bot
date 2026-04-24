@@ -1049,10 +1049,14 @@ async function sendTicketPanel(channel, type) {
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-        const row = new ActionRowBuilder().addComponents(
+               const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('open_ticket_rank')
                 .setLabel('تقديم على رتبه')
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId('open_ticket_rank_en')
+                .setLabel('Application')
                 .setStyle(ButtonStyle.Primary)
         );
 
@@ -1070,12 +1074,17 @@ async function sendTicketPanel(channel, type) {
             )
             .setFooter({ text: '𝟎𝟖 – Ticketing without clutter' });
 
-        const row = new ActionRowBuilder().addComponents(
+                const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('open_ticket_buy_purchase').setLabel('شراء').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId('open_ticket_buy_complaint').setLabel('شكوى').setStyle(ButtonStyle.Danger),
             new ButtonBuilder().setCustomId('open_ticket_buy_inquiry').setLabel('استفسار').setStyle(ButtonStyle.Primary),
         );
-        await channel.send({ embeds: [embed], components: [row] });
+        const row2 = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('open_ticket_buy_purchase_en').setLabel('Purchase').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('open_ticket_buy_complaint_en').setLabel('Complaint').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId('open_ticket_buy_inquiry_en').setLabel('Inquiry').setStyle(ButtonStyle.Primary),
+        );
+        await channel.send({ embeds: [embed], components: [row, row2] });
         return;
     }
 
@@ -1511,6 +1520,9 @@ client.on('interactionCreate', async (interaction) => {
                     { label: 'تقديم اداره',  value: 'تقديم_اداره' },
                     { label: 'مشكله',        value: 'مشكله' },
                     { label: 'استفسار',      value: 'استفسار' },
+                    { label: 'Application for an administrative position', value: 'admin_application' },
+                    { label: 'Issue',        value: 'issue' },
+                    { label: 'Inquiry',      value: 'inquiry' },
                 ]);
             const row = new ActionRowBuilder().addComponents(select);
             await interaction.reply({ content: 'اختر نوع التذكرة:', components: [row], ephemeral: true });
@@ -1524,6 +1536,9 @@ client.on('interactionCreate', async (interaction) => {
                     { label: 'تقديم اداره',  value: 'تقديم_اداره' },
                     { label: 'مشكله',        value: 'مشكله' },
                     { label: 'استفسار',      value: 'استفسار' },
+                    { label: 'Application for an administrative position', value: 'admin_application' },
+                    { label: 'Issue',        value: 'issue' },
+                    { label: 'Inquiry',      value: 'inquiry' },
                 ]);
 
             const row = new ActionRowBuilder().addComponents(select);
@@ -1543,6 +1558,8 @@ client.on('interactionCreate', async (interaction) => {
                 .addOptions([
                     { label: 'تقديم على 𝘛𝘪𝘬', value: 'tik' },
                     { label: 'تقديم على 𝘚𝘵𝘳𝘦', value: 'stre' },
+                    { label: 'Application for 𝘛𝘪𝘬', value: 'tik_en' },
+                    { label: 'Application for 𝘚𝘵𝘳𝘦', value: 'stre_en' },
                 ]);
             const row = new ActionRowBuilder().addComponents(select);
             await interaction.reply({ content: 'اختر نوع التقديم:', components: [row], ephemeral: true });
@@ -1649,6 +1666,23 @@ client.on('interactionCreate', async (interaction) => {
             await createTicket(interaction, 'Subscription', TICKET_CATEGORY_SUB_ID);
             return;
         }
+        
+        if (id === 'open_ticket_buy_purchase_en') {
+            await createTicket(interaction, 'Purchase', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_buy_complaint_en') {
+            await createTicket(interaction, 'Complaint', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_buy_inquiry_en') {
+            await createTicket(interaction, 'Inquiry', TICKET_CATEGORY_BUY_ID);
+            return;
+        }
+        if (id === 'open_ticket_rank_en') {
+            await createTicket(interaction, 'Application', TICKET_CATEGORY_RANK_ID);
+            return;
+        }
     }
 
     // ───────────── قوائم الاختيار ─────────────
@@ -1660,7 +1694,7 @@ client.on('interactionCreate', async (interaction) => {
 
                const categoryId =
             id === 'ticket_select_tik'
-                ? (value === 'stre' ? TICKET_CATEGORY_STRE_ID : TICKET_CATEGORY_TIK_ID)
+                ? ((value === 'stre' || value === 'stre_en') ? TICKET_CATEGORY_STRE_ID : TICKET_CATEGORY_TIK_ID)
                 : id === 'ticket_select_general_2'
                     ? TICKET_CATEGORY_GENERAL_2_ID
                     : TICKET_CATEGORY_GENERAL_ID;
