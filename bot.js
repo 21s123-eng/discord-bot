@@ -1025,10 +1025,35 @@ async function handleSendCommand(message) {
     }
 
     try {
-        await channel.send({
-            content: text || undefined,
-            files: attachments.map((attachment) => attachment.url),
-        });
+        const MAX_LEN = 2000;
+        const chunks = [];
+        if (text) {
+            let remaining = text;
+            while (remaining.length > 0) {
+                if (remaining.length <= MAX_LEN) {
+                    chunks.push(remaining);
+                    break;
+                }
+                let cut = remaining.lastIndexOf('\n', MAX_LEN);
+                if (cut <= 0) cut = remaining.lastIndexOf(' ', MAX_LEN);
+                if (cut <= 0) cut = MAX_LEN;
+                chunks.push(remaining.slice(0, cut));
+                remaining = remaining.slice(cut).trimStart();
+            }
+        }
+
+        if (chunks.length === 0) {
+            await channel.send({
+                files: attachments.map((attachment) => attachment.url),
+            });
+        } else {
+            for (let i = 0; i < chunks.length; i++) {
+                await channel.send({
+                    content: chunks[i],
+                    files: i === 0 ? attachments.map((attachment) => attachment.url) : [],
+                });
+            }
+        }
 
         if (attachments.length > 0) {
             await wait(700);
@@ -1039,6 +1064,7 @@ async function handleSendCommand(message) {
                 console.log(`[SEPARATOR ERR] ${error.message}`);
                 await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
             });
+        }
         }
 
         await message.reply('تم إرسال الرسالة.').catch(() => {});
