@@ -1065,7 +1065,6 @@ async function handleSendCommand(message) {
                 await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
             });
         }
-        }
 
         await message.reply('تم إرسال الرسالة.').catch(() => {});
     } catch (error) {
