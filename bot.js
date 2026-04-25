@@ -1079,7 +1079,7 @@ async function handleVerifyMessageCommand(message) {
     let text = message.content.slice('!verifymsg'.length).trim();
 
     if (!text) {
-        text = `*للتفعيل ودخول السيرفر اضغط على  ${VERIFY_EMOJI}  *\n\n@here`;
+        text = `*للتفعيل ودخول السيرفر اضغط على  ${VERIFY_EMOJI}  *\n*To activate and access the server, click on ${VERIFY_EMOJI}   *\n\n@here`;
     }
 
     const channel = await client.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
