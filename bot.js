@@ -1023,10 +1023,9 @@ async function handleSenddCommand(message) {
     if (!isOwner && !(senderMember && hasAnyRole(senderMember, SEND_COMMAND_ROLE_IDS))) return false;
 
     const args = message.content.slice('!sendd '.length).trim();
-    const firstNewline = args.indexOf('\n');
-    const channelId = firstNewline === -1 ? args.trim() : args.slice(0, firstNewline).trim();
-    const text = firstNewline === -1 ? '' : args.slice(firstNewline + 1).trim();
-
+    const firstSpace = args.indexOf(' ');
+    const channelId = firstSpace === -1 ? args.trim() : args.slice(0, firstSpace).trim();
+    const text = firstSpace === -1 ? '' : args.slice(firstSpace + 1).trim();
     const channel = await client.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isTextBased()) {
         await message.reply('ما لقيت الروم.').catch(() => {});
