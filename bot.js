@@ -29,6 +29,7 @@ const VERIFY_ROLE_ID = '1495099381639020736';
 const UNVERIFIED_ROLE_ID = '1491831215219806248';
 
 const AVATAR_SEPARATOR_FILE = './separator.png';
+const AVATAR_SEPARATOR_FILE_2 = './separator2.png';
 
 const VIDEO_REACTION_CHANNEL_ID = '1490108870524276876';
 const VIDEO_REACTION_CHANNEL_2_ID = '1490111448754421850';
@@ -362,21 +363,50 @@ const AVATAR_SEPARATOR_CHANNEL_IDS = new Set([
     '1493533721637158922',
     '1493891000588828792',
     '1490111514437226748',
+    '1490109019669663886',
+    '1490108870524276876',
+]);
+
+const AVATAR_SEPARATOR_CHANNEL_2_IDS = new Set([
+    '1490111448754421850',
+    '1497201943897047082',
+    '1497201288859881513',
+    '1497201552304373980',
+    '1492475128087576706',
+    '1497265642737500392',
+    '1490119911475908706',
+    '1497265697338818823',
+    '1497266452044976319',
+    '1497266476409684231',
+    '1497266513349185708',
+    '1497266564250992670',
+    '1497266733185241348',
+    '1497266749085712564',
+    '1497266765560942632',
+    '1497266786830385213',
+    '1497266802672144446',
+    '1497266816807075860',
+    '1497266842224562347',
+    '1497266855167918271',
+    '1497266867625263194',
+    '1497266881508278282',
+    '1497266898134634699',
+    '1497332862934974595',
+    '1497333007181418717',
+    '1497266908041314484',
+    '1497333139964428379',
     '1490109001231372520',
     '1490109011176063097',
     '1490109004461113566',
     '1490109014032253179',
-    '1490109019669663886',
-    '1490109021506765060',
-    '1493533721637158922',
-    '1490108870524276876',
-    '1497201552304373980',
-    '1497201288859881513',
-    '1497201943897047082',
-    '1490111448754421850',
     '1497203030678962356',
+    '1490109021506765060',
 ]);
 
+const LINK_ALLOWED_CHANNEL_IDS = new Set([
+    '1492475128087576706',
+    '1490119748120481914',
+]);
 console.log('NEW CODE VERSION - ROLE MEMBERS RESTORE');
 
 const client = new Client({
@@ -938,8 +968,13 @@ function messageHasImage(message) {
 async function handleAvatarSeparator(message) {
     if (!message.guild) return;
     if (message.author.bot) return;
-    if (!AVATAR_SEPARATOR_CHANNEL_IDS.has(message.channel.id)) return;
-    if (!messageHasImage(message)) return;
+
+    const isAnyMsgChannel = message.channel.id === '1490119748120481914';
+    const isSep2Channel = AVATAR_SEPARATOR_CHANNEL_2_IDS.has(message.channel.id);
+    const isSep1Channel = AVATAR_SEPARATOR_CHANNEL_IDS.has(message.channel.id);
+
+    if (!isAnyMsgChannel && !isSep1Channel && !isSep2Channel) return;
+    if (!isAnyMsgChannel && !messageHasImage(message)) return;
 
     const cooldownKey = `${message.channel.id}:${message.author.id}`;
     const last = avatarCooldowns.get(cooldownKey);
@@ -952,14 +987,15 @@ async function handleAvatarSeparator(message) {
 
     await wait(700);
 
+    const file = isSep2Channel ? AVATAR_SEPARATOR_FILE_2 : AVATAR_SEPARATOR_FILE;
+
     await message.channel.send({
-        files: [AVATAR_SEPARATOR_FILE],
+        files: [file],
     }).catch(async (error) => {
         console.log(`[SEPARATOR ERR] ${error.message}`);
-        await sendLog(message.guild, 'فشل إرسال separator.png. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
+        await sendLog(message.guild, 'فشل إرسال separator. تأكد الصورة جنب bot.js وأن البوت عنده Attach Files.');
     });
 }
-
 async function registerClearCommand(guild) {
     await guild.commands.create({
         name: CLEAR_COMMAND_NAME,
@@ -1473,11 +1509,20 @@ client.on('messageCreate', async (message) => {
                 });
             }
         }
+                            if (message.channel.id === VIDEO_REACTION_CHANNEL_ID) {
+            await wait(700);
+            await message.channel.send({ files: [AVATAR_SEPARATOR_FILE] }).catch(() => {});
+        }
 
         return;
     }
     
-    if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID) {
+    if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID && !LINK_ALLOWED_CHANNEL_IDS.has(message.channel.id)) {
+
+        return;
+    }
+    
+if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID && !LINK_ALLOWED_CHANNEL_IDS.has(message.channel.id)) {
         try {
             await message.delete().catch(() => {});
             const member = await message.guild.members.fetch(message.author.id).catch(() => null);
