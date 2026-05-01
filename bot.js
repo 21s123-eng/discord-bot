@@ -1034,7 +1034,7 @@ async function handleSenddCommand(message) {
 
     const attachment = [...message.attachments.values()][0] ?? null;
 
-    const embed = new EmbedBuilder().setColor(0x1a2a4a);
+    const embed = new EmbedBuilder().setColor(0xFFD700);
     if (text) embed.setDescription(text);
     if (attachment) embed.setImage(attachment.url);
 
