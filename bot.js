@@ -400,13 +400,12 @@ const restoringRoles = new Map();
 const channelSnapshots = new Map();
 const memberRoleSnapshots = new Map();
 
-const botActions = new Map();
+const botActions = new Set();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
 const channelUpdateLocks = new Map();
 const channelRestoreLogCooldowns = new Map();
 
-const restoringRoles = new Set();
 const restoringChannels = new Set();
 
 // Buffer that captures member IDs the moment a role is removed in guildMemberUpdate.
