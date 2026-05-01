@@ -400,7 +400,7 @@ const restoringRoles = new Map();
 const channelSnapshots = new Map();
 const memberRoleSnapshots = new Map();
 
-const botActions = new Set();
+const botActions = new Map();
 const punishCooldowns = new Map();
 const avatarCooldowns = new Map();
 const channelUpdateLocks = new Map();
