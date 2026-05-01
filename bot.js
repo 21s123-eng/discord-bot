@@ -1015,6 +1015,34 @@ async function registerClearCommand(guild) {
         console.log(`[CLEAR REGISTER ERR] ${error.message}`);
     });
 }
+async function handleSenddCommand(message) {
+    if (!message.content.startsWith('!sendd ')) return false;
+
+    const isOwner = message.author.id === OWNER_ID;
+    const senderMember = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
+    if (!isOwner && !(senderMember && hasAnyRole(senderMember, SEND_COMMAND_ROLE_IDS))) return false;
+
+    const args = message.content.slice('!sendd '.length).trim();
+    const firstNewline = args.indexOf('\n');
+    const channelId = firstNewline === -1 ? args.trim() : args.slice(0, firstNewline).trim();
+    const text = firstNewline === -1 ? '' : args.slice(firstNewline + 1).trim();
+
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+        await message.reply('ما لقيت الروم.').catch(() => {});
+        return true;
+    }
+
+    const attachment = [...message.attachments.values()][0] ?? null;
+
+    const embed = new EmbedBuilder().setColor(0x1a2a4a);
+    if (text) embed.setDescription(text);
+    if (attachment) embed.setImage(attachment.url);
+
+    await channel.send({ embeds: [embed] }).catch(() => {});
+    await message.reply('تم الإرسال.').catch(() => {});
+    return true;
+}
 
 async function handleSendCommand(message) {
     if (!message.content.startsWith('!send ')) return false;
@@ -1541,6 +1569,7 @@ if (LINK_REGEX.test(message.content) && message.author.id !== OWNER_ID && !LINK_
         }
         return;
     }
+            if (await handleSenddCommand(message)) return;
 
         if (await handleSendCommand(message)) return;
 
