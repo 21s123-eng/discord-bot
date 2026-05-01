@@ -260,6 +260,7 @@ const SEND_COMMAND_ROLE_IDS = new Set([
     '1491823288249356409',
     '1491811256896589905',
     '1490156350896996413',
+    '1499717430417555516',
 ]);
 
 const RATING_TRIGGER_ROLE_IDS = new Set([
@@ -395,7 +396,7 @@ const client = new Client({
     ],
 });
 
-const roleSnapshots = new Map();
+const restoringRoles = new Map();
 const channelSnapshots = new Map();
 const memberRoleSnapshots = new Map();
 
@@ -808,7 +809,7 @@ async function punish(guild, executor, reason) {
 // FIX: Removed setPosition — the role is restored without forcing it back
 // to the original position. Only the role properties and its members are restored.
 async function restoreDeletedRole(guild, oldRoleId, snapshot) {
-    restoringRoles.add(guild.id);
+    restoringRoles.set(guild.id, (restoringRoles.get(guild.id) ?? 0) + 1);
 
     const role = await guild.roles.create({
         name: snapshot.name,
@@ -822,7 +823,9 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
         return null;
     });
 
-    restoringRoles.delete(guild.id);
+    const cur = restoringRoles.get(guild.id) ?? 1;
+    if (cur <= 1) restoringRoles.delete(guild.id);
+    else restoringRoles.set(guild.id, cur - 1);
 
     if (!role) return null;
 
@@ -846,23 +849,19 @@ async function restoreDeletedRole(guild, oldRoleId, snapshot) {
 
     console.log(`[RESTORE MEMBERS] role=${snapshot.name} members to restore=${memberIds.length}`);
 
-    for (const memberId of memberIds) {
+     await Promise.all(memberIds.map(async (memberId) => {
         const member = await guild.members.fetch(memberId).catch(() => null);
-
         if (!member) {
             console.log(`[RESTORE MEMBERS] could not fetch member ${memberId}`);
-            continue;
+            return;
         }
-
         markBotAction(memberKey(guild.id, member.id));
-
         await member.roles.add(role, 'Protection rollback: restore role membership').catch((err) => {
             console.log(`[RESTORE MEMBERS ERR] ${member.user.tag} — ${err.message}`);
         });
-
         const updated = await guild.members.fetch(member.id).catch(() => member);
         saveMember(updated);
-    }
+    }));
 
     console.log(`[RESTORE MEMBERS DONE] role=${snapshot.name}`);
 
@@ -987,7 +986,7 @@ async function handleSendCommand(message) {
     const isOwner = message.author.id === OWNER_ID;
     if (!isOwner) {
         const senderMember = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
-        const hasPermission = senderMember && senderMember.roles.cache.has('1490156350896996413');
+        const hasPermission = senderMember && hasAnyRole(senderMember, SEND_COMMAND_ROLE_IDS);
         if (!hasPermission) return false;
     }
 
@@ -1949,7 +1948,7 @@ client.on('roleCreate', async (role) => {
 
     const key = roleKey(role.guild.id, role.id);
 
-    if (restoringRoles.has(role.guild.id) || isBotAction(key)) {
+       if ((restoringRoles.get(role.guild.id) ?? 0) > 0 || isBotAction(key)) {
         saveRole(role);
         return;
     }
@@ -2413,6 +2412,21 @@ client.on('guildBanAdd', async (ban) => {
 const MEMBER_LOG_CHANNEL_ID = '1494797903754035332';
 
 client.on('guildMemberAdd', async (member) => {
+        if (member.user.bot && member.id !== client.user?.id) {
+        const executor = await getAuditExecutor(member.guild, AuditLogEvent.BotAdd, member.id, true);
+        await member.kick('حماية: لا يسمح بإضافة بوتات').catch(() => {});
+        await sendLog(member.guild, `طردت بوت جديد: ${member.user.tag} (${member.id})`);
+        if (executor && !isIgnored(executor.id, executor.bot)) {
+            const executorMember = await member.guild.members.fetch(executor.id).catch(() => null);
+            if (executorMember) {
+                await executorMember.kick('حماية: إضافة بوت للسيرفر').catch(async (err) => {
+                    await sendLog(member.guild, `ما قدرت أطرد ${executor.tag} — ${err.message}`);
+                });
+                await sendLog(member.guild, `طردت <@${executor.id}> بسبب إضافة بوت`);
+            }
+        }
+        return;
+    }
         await assignUnverifiedIfNoRoles(member, 'Member join: assign unverified role');
     try {
         const channel = member.guild.channels.cache.get(MEMBER_LOG_CHANNEL_ID)
